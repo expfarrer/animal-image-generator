@@ -3,10 +3,12 @@
 "use client";
 import { configureStore } from "@reduxjs/toolkit";
 import imageReducer from "./features/imageSlice";
+import modelReducer from "./features/modelSlice";
 
 export const store = configureStore({
   reducer: {
     image: imageReducer,
+    model: modelReducer,
   },
 });
 

@@ -63,6 +63,8 @@ export const runtime = "nodejs";
  *   I can enable that behavior; by default the client controls whether to retry (safer).
  */
 
+// Used for the image-editing path (gpt-image-1 /images/edits):
+// references "the uploaded animal" because the model can see the photo.
 const promptTemplates: Record<string, string> = {
   celebration:
     "A joyful, colorful celebration scene centered around the uploaded animal. Add confetti, warm sunlight, and a festive banner that reads '{{caption}}'. Photorealistic, bright, high detail.",
@@ -72,6 +74,20 @@ const promptTemplates: Record<string, string> = {
     "A playful retirement-themed scene with the uploaded animal wearing a party hat and holding a small cake, warm tones, whimsical photorealism.",
   fantasy:
     "Transform the uploaded animal into a fantasy creature with glowing wings and soft magical light. Painterly, highly detailed.",
+};
+
+// Used for text-only generation (/images/generations — no photo supplied).
+// Uses {{animal}} (filled from classifierLabel or "pet") instead of "the uploaded animal".
+// Caption handling is identical to promptTemplates above.
+const promptTemplatesTextOnly: Record<string, string> = {
+  celebration:
+    "A joyful, colorful celebration scene featuring a {{animal}} as the star. Add confetti, warm sunlight, and a festive banner that reads '{{caption}}'. Photorealistic, vibrant, high detail.",
+  memorial:
+    "A respectful, soft-toned portrait of a {{animal}} with gentle golden light and a subtle arrangement of flowers. Soft vignette, cinematic film look, calm and reverent.",
+  retirement:
+    "A whimsical retirement-themed scene with a {{animal}} wearing a party hat and holding a small cake, warm tones, playful photorealism.",
+  fantasy:
+    "A {{animal}} transformed into a majestic fantasy creature with glowing wings and ethereal soft light. Painterly, highly detailed, magical.",
 };
 
 // gpt-image-1 pricing estimates (token-based; these are rough per-image approximations)
@@ -132,17 +148,70 @@ async function moderateContent(
     .map(([k]) => k);
 }
 
+const ALLOWED_TOPICS = new Set(Object.keys(promptTemplates));
+const ALLOWED_QUALITIES = new Set(["low", "medium", "high"]);
+// classifierLabel is a free-form ImageNet label — strip to safe chars, cap length
+function sanitizeClassifierLabel(raw: string | null): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[^a-zA-Z0-9 _-]/g, "").trim().slice(0, 80);
+  return cleaned || null;
+}
+
+// Per-IP in-memory rate limiter — fixed window, resets each WINDOW_MS interval.
+// Note: in-memory only, so limits are per-process. Sufficient for single-instance deployments.
+const RATE_LIMIT_MAX = 10;          // max requests per window per IP
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const _rateStore = new Map<string, { count: number; windowStart: number }>();
+
+function getClientIp(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp) return realIp.trim();
+  return "unknown";
+}
+
+function checkRateLimit(ip: string): { allowed: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const entry = _rateStore.get(ip);
+  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    _rateStore.set(ip, { count: 1, windowStart: now });
+    return { allowed: true, retryAfterSec: 0 };
+  }
+  if (entry.count >= RATE_LIMIT_MAX) {
+    const retryAfterSec = Math.ceil((RATE_LIMIT_WINDOW_MS - (now - entry.windowStart)) / 1000);
+    return { allowed: false, retryAfterSec };
+  }
+  entry.count++;
+  return { allowed: true, retryAfterSec: 0 };
+}
+
 export async function POST(req: Request) {
-  console.log("KEY PREFIX:", process.env.OPENAI_API_KEY?.slice(0, 12));
+  const ip = getClientIp(req);
+  const rl = checkRateLimit(ip);
+  if (!rl.allowed) {
+    return new Response(
+      JSON.stringify({ error: `Too many requests. Please wait ${rl.retryAfterSec} seconds before trying again.` }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(rl.retryAfterSec),
+        },
+      },
+    );
+  }
+
   try {
     const form = await req.formData();
     const file = form.get("image") as File | null;
-    const topic = (form.get("topic") as string) || "celebration";
+    const topicRaw = (form.get("topic") as string) || "celebration";
+    const topic = ALLOWED_TOPICS.has(topicRaw) ? topicRaw : "celebration";
     const caption = (form.get("caption") as string) || "";
-    const quality = (form.get("quality") as string) || "low";
-    const sizeHintRaw = (form.get("size") as string) || null;
+    const qualityRaw = (form.get("quality") as string) || "low";
+    const quality = ALLOWED_QUALITIES.has(qualityRaw) ? qualityRaw : "low";
     const noImageFlag = (form.get("no_image") as string) === "1";
-    const classifierLabel = (form.get("classifier_label") as string) || null; // optional hint from client
+    const classifierLabel = sanitizeClassifierLabel(form.get("classifier_label") as string | null);
 
     if (!file && !noImageFlag) {
       return new Response(JSON.stringify({ error: "No image uploaded" }), {
@@ -155,9 +224,9 @@ export async function POST(req: Request) {
     let inputBuffer: Buffer | null = null;
     let inputB64: string | null = null;
     if (file) {
-      if (file.size > 30 * 1024 * 1024) {
+      if (file.size > 5 * 1024 * 1024) {
         return new Response(
-          JSON.stringify({ error: "Image too large (max 30MB)" }),
+          JSON.stringify({ error: "Image too large (max 5MB)" }),
           { status: 400, headers: { "Content-Type": "application/json" } },
         );
       }
@@ -198,10 +267,18 @@ export async function POST(req: Request) {
     // If noImageFlag is set, generate from prompt only (text-only generation)
     // Otherwise call edits endpoint with provided image and prompt
     if (noImageFlag || !file) {
-      // Text-only generation endpoint for DALL·E family
-      const genPrompt = classifierLabel
-        ? `${promptBase} The subject is a ${classifierLabel}.`
-        : promptBase;
+      // Text-only generation — build a dedicated prompt that never references "the uploaded animal"
+      const animalSlot = classifierLabel ?? "pet";
+      const textOnlyTemplate =
+        (promptTemplatesTextOnly[topic] ?? promptTemplatesTextOnly["celebration"])
+          .replace("{{animal}}", animalSlot);
+      const genPrompt = textOnlyTemplate.includes("{{caption}}")
+        ? textOnlyTemplate.replace("{{caption}}", caption)
+        : caption
+          ? `${textOnlyTemplate} ${caption}`
+          : textOnlyTemplate;
+
+      console.log("[generate-image] text-only prompt:", genPrompt);
 
       const body = JSON.stringify({
         model: DEFAULT_MODEL,
@@ -230,13 +307,9 @@ export async function POST(req: Request) {
       }
 
       if (!res.ok) {
+        console.error("[generate-image] provider error (generation):", json ?? text);
         return new Response(
-          JSON.stringify({
-            error: "Provider error",
-            detail: json ?? text,
-            model_used: DEFAULT_MODEL,
-            size_used: sizeUsed,
-          }),
+          JSON.stringify({ error: "Image generation failed. Please try again." }),
           { status: 502, headers: { "Content-Type": "application/json" } },
         );
       }
@@ -245,11 +318,11 @@ export async function POST(req: Request) {
       if (json?.data?.[0]?.url) {
         return NextResponse.json({
           url: json.data[0].url,
+          text_only: true,
           latency_ms: latencyMs,
           cost_usd: costEstimate,
           model_used: DEFAULT_MODEL,
           size_used: sizeUsed,
-
         });
       }
       if (json?.data?.[0]?.b64_json) {
@@ -257,21 +330,18 @@ export async function POST(req: Request) {
         const dataUrl = `data:image/png;base64,${b64}`;
         return NextResponse.json({
           url: dataUrl,
+          text_only: true,
           latency_ms: latencyMs,
           cost_usd: costEstimate,
           model_used: DEFAULT_MODEL,
           size_used: sizeUsed,
-
         });
       }
 
       // unexpected
+      console.error("[generate-image] unexpected provider response (generation):", json);
       return new Response(
-        JSON.stringify({
-          error: "Unexpected provider response format (generation)",
-          raw: json,
-          model_used: DEFAULT_MODEL,
-        }),
+        JSON.stringify({ error: "Image generation failed. Please try again." }),
         { status: 502, headers: { "Content-Type": "application/json" } },
       );
     }
@@ -309,13 +379,9 @@ export async function POST(req: Request) {
     }
 
     if (!response.ok) {
+      console.error("[generate-image] provider error (edits):", json ?? text);
       return new Response(
-        JSON.stringify({
-          error: "Provider error",
-          detail: json ?? text,
-          model_used: DEFAULT_MODEL,
-          size_used: sizeUsed,
-        }),
+        JSON.stringify({ error: "Image generation failed. Please try again." }),
         { status: 502, headers: { "Content-Type": "application/json" } },
       );
     }
@@ -338,12 +404,9 @@ export async function POST(req: Request) {
       });
     } else {
       // unexpected
+      console.error("[generate-image] unexpected provider response (edits):", json);
       return new Response(
-        JSON.stringify({
-          error: "Unexpected provider response format (edits)",
-          raw: json,
-          model_used: DEFAULT_MODEL,
-        }),
+        JSON.stringify({ error: "Image generation failed. Please try again." }),
         { status: 502, headers: { "Content-Type": "application/json" } },
       );
     }
@@ -380,18 +443,15 @@ export async function POST(req: Request) {
     }
 
     // fallback
+    console.error("[generate-image] no usable image in provider response:", json);
     return new Response(
-      JSON.stringify({
-        error: "No usable image returned by provider",
-        raw: json,
-        model_used: DEFAULT_MODEL,
-      }),
+      JSON.stringify({ error: "Image generation failed. Please try again." }),
       { status: 502, headers: { "Content-Type": "application/json" } },
     );
   } catch (err: any) {
     console.error("Server error in generate-image route:", err);
     return new Response(
-      JSON.stringify({ error: "Server error", detail: String(err) }),
+      JSON.stringify({ error: "Server error. Please try again." }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
