@@ -91,6 +91,47 @@ async function fileToBuffer(file: File) {
   return Buffer.from(ab);
 }
 
+/**
+ * Runs OpenAI's moderation API on an image buffer and a text string.
+ * Returns the flagged categories if content is rejected, or null if clean.
+ */
+async function moderateContent(
+  imageB64: string | null,
+  text: string | null,
+): Promise<string[] | null> {
+  const input: any[] = [];
+  if (text) input.push({ type: "text", text });
+  if (imageB64) {
+    input.push({
+      type: "image_url",
+      image_url: { url: `data:image/png;base64,${imageB64}` },
+    });
+  }
+  if (input.length === 0) return null;
+
+  const res = await fetch("https://api.openai.com/v1/moderations", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model: "omni-moderation-latest", input }),
+  });
+
+  if (!res.ok) {
+    console.warn("[moderation] API error, skipping check:", await res.text());
+    return null; // fail open — don't block on moderation outage
+  }
+
+  const json = await res.json();
+  const result = json?.results?.[0];
+  if (!result?.flagged) return null;
+
+  return Object.entries(result.categories as Record<string, boolean>)
+    .filter(([, v]) => v)
+    .map(([k]) => k);
+}
+
 export async function POST(req: Request) {
   console.log("KEY PREFIX:", process.env.OPENAI_API_KEY?.slice(0, 12));
   try {
@@ -122,6 +163,19 @@ export async function POST(req: Request) {
       }
       inputBuffer = await fileToBuffer(file);
       inputB64 = inputBuffer.toString("base64");
+    }
+
+    // Moderate image and caption before doing anything expensive
+    const flaggedCategories = await moderateContent(inputB64, caption || null);
+    if (flaggedCategories) {
+      console.warn("[moderation] content flagged:", flaggedCategories);
+      return new Response(
+        JSON.stringify({
+          error: "Content policy violation",
+          detail: "The uploaded image or text was flagged as inappropriate and cannot be processed.",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
     }
 
     // build prompt
