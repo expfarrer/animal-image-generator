@@ -42,9 +42,14 @@ const BLOCKED_TERMS = [
   "bitch", "whore", "slut", "bastard",
 ];
 
+// Pre-compiled whole-word regexes — prevents substring false positives like
+// "sunglasses" triggering "ass", "classic" triggering "ass", etc.
+const BLOCKED_REGEXES = BLOCKED_TERMS.map((t) => new RegExp(`\\b${t}\\b`));
+
 function containsBlockedTerm(text: string): string | null {
   const lower = text.toLowerCase();
-  return BLOCKED_TERMS.find((t) => lower.includes(t)) ?? null;
+  const idx = BLOCKED_REGEXES.findIndex((re) => re.test(lower));
+  return idx >= 0 ? BLOCKED_TERMS[idx] : null;
 }
 
 // MobileNet uses ImageNet labels which name animals by species/breed.
@@ -146,6 +151,7 @@ const TOPICS = [
   { id: "memorial", label: "Memorial" },
   { id: "retirement", label: "Retirement" },
   { id: "fantasy", label: "Fantasy" },
+  { id: "keywords", label: "Keywords only" },
 ];
 
 export default function ImageGeneratorForm() {
@@ -196,6 +202,7 @@ export default function ImageGeneratorForm() {
   const [serverImageDimensions, setServerImageDimensions] = useState<string | null>(null);
   const [identicalDetected, setIdenticalDetected] = useState<boolean>(false);
   const [captionError, setCaptionError] = useState<string | null>(null);
+  const [blockedWord, setBlockedWord] = useState<string | null>(null);
 
   // Toast system
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -212,11 +219,14 @@ export default function ImageGeneratorForm() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }
 
-  // Per-session generation counter — persists across page refreshes, resets on tab close
-  const [genCount, setGenCount] = useState<number>(() => {
-    if (typeof window === "undefined") return 0;
-    return parseInt(sessionStorage.getItem(STORAGE_KEY) ?? "0", 10) || 0;
-  });
+  // Per-session generation counter — persists across page refreshes, resets on tab close.
+  // Initialize to 0 so server and client render identically; sync from sessionStorage
+  // after hydration to avoid a hydration mismatch when the count makes genRemaining <= 3.
+  const [genCount, setGenCount] = useState<number>(0);
+  useEffect(() => {
+    const stored = parseInt(sessionStorage.getItem(STORAGE_KEY) ?? "0", 10) || 0;
+    if (stored !== 0) setGenCount(stored);
+  }, []);
   function incrementGenCount() {
     setGenCount((prev) => {
       const next = prev + 1;
@@ -237,8 +247,10 @@ export default function ImageGeneratorForm() {
   const MAX_FILE_SIZE_MB = 5;
   const PREVIEW_MAX_DIM = 1024;
 
-  // local timer id for the interval
-  const [localTimerId, setLocalTimerId] = useState<number | null>(null);
+  // useRef so async functions (submit) always read the current interval id,
+  // avoiding the stale-closure bug where finalizeTimerAndSet saw null and
+  // never cleared the interval after the image was returned.
+  const timerIdRef = useRef<number | null>(null);
 
   // helper to compute top classifier label (if available)
   const topClassifierLabel =
@@ -250,24 +262,22 @@ export default function ImageGeneratorForm() {
   function startTimer() {
     dispatch(setElapsed(0));
     const start = Date.now();
-    if (localTimerId) window.clearInterval(localTimerId);
-    const id = window.setInterval(() => {
+    if (timerIdRef.current) window.clearInterval(timerIdRef.current);
+    timerIdRef.current = window.setInterval(() => {
       dispatch(setElapsed(Date.now() - start));
     }, 200);
-    setLocalTimerId(id);
   }
   function finalizeTimerAndSet(milliseconds: number) {
-    // clear the interval and set a final elapsed value
-    if (localTimerId) {
-      window.clearInterval(localTimerId);
-      setLocalTimerId(null);
+    if (timerIdRef.current) {
+      window.clearInterval(timerIdRef.current);
+      timerIdRef.current = null;
     }
     dispatch(setElapsed(milliseconds));
   }
   function stopTimer() {
-    if (localTimerId) {
-      window.clearInterval(localTimerId);
-      setLocalTimerId(null);
+    if (timerIdRef.current) {
+      window.clearInterval(timerIdRef.current);
+      timerIdRef.current = null;
     }
   }
 
@@ -367,8 +377,9 @@ export default function ImageGeneratorForm() {
       dispatch(setStatus("Please select an image"));
       return;
     }
-    const blockedWord = containsBlockedTerm(caption);
-    if (blockedWord) {
+    const detected = containsBlockedTerm(caption);
+    if (detected) {
+      setBlockedWord(detected);
       setCaptionError("Keywords contain inappropriate content. Please edit and try again.");
       return;
     }
@@ -403,7 +414,9 @@ export default function ImageGeneratorForm() {
       fd.append("image", uploadBlob, originalFileName);
     fd.append("topic", topic);
     fd.append("caption", caption || "");
-    fd.append("quality", quality);
+    // POC: locked to medium ($0.07/image) — restore dynamic value for V1
+    fd.append("quality", "medium");
+    fd.append("size", size);
     // include classifier top label to help text-only fallback
     if (topClassifierLabel) fd.append("classifier_label", topClassifierLabel);
     if (noImage) fd.append("no_image", "1");
@@ -540,7 +553,11 @@ export default function ImageGeneratorForm() {
         <div className="flex-1 flex flex-col gap-3 p-4 pb-10 max-w-lg mx-auto w-full">
 
           {/* ── Image area ── */}
-          <div className="relative w-full aspect-square rounded-2xl overflow-hidden bg-slate-900 shadow-md">
+          <div className={`relative w-full rounded-2xl overflow-hidden bg-slate-900 shadow-md ${
+            size === "1024x1536" ? "aspect-[2/3]" :
+            size === "1536x1024" ? "aspect-[3/2]" :
+            "aspect-square"
+          }`}>
 
             {/* Empty state: tap the whole area to upload */}
             {!displayUrl && (
@@ -660,7 +677,7 @@ export default function ImageGeneratorForm() {
               </div>
             </div>
 
-            {/* Quality */}
+            {/* POC: hidden for now — restore for V1 quality tier feature
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Quality</label>
               <div className="flex gap-2">
@@ -681,6 +698,33 @@ export default function ImageGeneratorForm() {
                 ))}
               </div>
             </div>
+            */}
+
+            {/* Size */}
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Size</label>
+              <div className="flex gap-2">
+                {([
+                  { id: "1024x1024", label: "Square" },
+                  { id: "1024x1536", label: "Portrait" },
+                  { id: "1536x1024", label: "Landscape" },
+                ] as const).map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => dispatch(setSize(s.id))}
+                    disabled={loading}
+                    className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-colors ${
+                      size === s.id
+                        ? "bg-indigo-600 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Keywords */}
             <div>
@@ -690,7 +734,9 @@ export default function ImageGeneratorForm() {
                 maxLength={MAX_CAPTION_LENGTH}
                 onChange={(e) => {
                   dispatch(setCaption(e.target.value));
-                  setCaptionError(containsBlockedTerm(e.target.value) ? "Inappropriate content detected." : null);
+                  const word = containsBlockedTerm(e.target.value);
+                  setBlockedWord(word);
+                  setCaptionError(word ? "Inappropriate content detected." : null);
                 }}
                 placeholder="e.g. golden light, garden, beloved family companion"
                 className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 ${captionError ? "border-red-400 focus:ring-red-400" : "border-slate-200 focus:ring-indigo-500"}`}
@@ -698,7 +744,13 @@ export default function ImageGeneratorForm() {
               />
               <div className="mt-1 flex justify-between items-start">
                 {captionError
-                  ? <p className="text-xs text-red-600">{captionError}</p>
+                  ? (
+                    <p className="text-xs text-red-600">
+                      {blockedWord
+                        ? <>Contains: <span className="line-through font-medium">{blockedWord}</span> — please remove it</>
+                        : captionError}
+                    </p>
+                  )
                   : <span />
                 }
                 <p className={`text-xs tabular-nums ${
@@ -759,20 +811,32 @@ export default function ImageGeneratorForm() {
             </div>
           )}
 
-          {/* Result metadata (collapsed by default) */}
+          {/* Prompt sent to AI */}
           {resultUrl && serverPromptUsed && (
-            <details className="bg-white rounded-2xl shadow-sm p-4 text-xs text-slate-500">
-              <summary className="cursor-pointer font-medium text-slate-700 text-sm">Generation details</summary>
-              <div className="mt-3 space-y-1.5">
-                {serverModel && <div>Model: <strong>{serverModel}</strong></div>}
-                {estimatedCost != null && <div>Est. cost: <strong>${estimatedCost.toFixed(3)}</strong></div>}
-                {serverLatencyMs != null && <div>Provider: <strong>{(serverLatencyMs / 1000).toFixed(2)}s</strong></div>}
-                <div className="mt-2 p-2 bg-slate-50 rounded-lg break-words leading-relaxed">
-                  <span className="font-medium text-slate-600">Prompt: </span>{serverPromptUsed}
-                </div>
-              </div>
-            </details>
+            <div className="bg-white rounded-2xl shadow-sm p-4">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Prompt sent to AI</p>
+              <p className="text-sm text-slate-600 leading-relaxed">{serverPromptUsed}</p>
+            </div>
           )}
+
+          {/* Hidden for launch — restore by uncommenting the block below
+          {resultUrl && !loading && (serverModel || elapsedMs != null) && (
+            <div className="bg-white rounded-2xl shadow-sm px-4 py-3 flex justify-around text-center">
+              {serverModel && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Model</p>
+                  <p className="text-sm font-medium text-slate-700">{serverModel}</p>
+                </div>
+              )}
+              {elapsedMs != null && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Speed</p>
+                  <p className="text-sm font-medium text-slate-700">{(elapsedMs / 1000).toFixed(1)}s</p>
+                </div>
+              )}
+            </div>
+          )}
+          end hidden stats strip */}
 
         </div>
       </div>

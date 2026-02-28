@@ -74,6 +74,8 @@ const promptTemplates: Record<string, string> = {
     "A playful retirement-themed scene with the uploaded animal wearing a party hat and holding a small cake, warm tones, whimsical photorealism.",
   fantasy:
     "Transform the uploaded animal into a fantasy creature with glowing wings and soft magical light. Painterly, highly detailed.",
+  // Keywords-only: no theme template — the user's keywords ARE the full prompt.
+  keywords: "{{caption}}",
 };
 
 // Used for text-only generation (/images/generations — no photo supplied).
@@ -88,6 +90,8 @@ const promptTemplatesTextOnly: Record<string, string> = {
     "A whimsical retirement-themed scene with a {{animal}} wearing a party hat and holding a small cake, warm tones, playful photorealism.",
   fantasy:
     "A {{animal}} transformed into a majestic fantasy creature with glowing wings and ethereal soft light. Painterly, highly detailed, magical.",
+  // Keywords-only: no theme template — the user's keywords ARE the full prompt.
+  keywords: "{{caption}}",
 };
 
 // gpt-image-1 pricing estimates (token-based; these are rough per-image approximations)
@@ -98,9 +102,9 @@ const COST_TABLE: Record<string, number> = {
 };
 
 const DEFAULT_MODEL = "gpt-image-1";
-// gpt-image-1 supports: 1024x1024 | 1024x1536 | 1536x1024 | auto
-// "auto" lets the model pick the best size for the content.
-const DEFAULT_SIZE = "auto";
+// gpt-image-1 supports: 1024x1024 | 1024x1536 | 1536x1024
+// Fallback when client sends no size or an invalid value.
+const DEFAULT_SIZE = "1024x1024";
 
 async function fileToBuffer(file: File) {
   const ab = await file.arrayBuffer();
@@ -150,6 +154,7 @@ async function moderateContent(
 
 const ALLOWED_TOPICS = new Set(Object.keys(promptTemplates));
 const ALLOWED_QUALITIES = new Set(["low", "medium", "high"]);
+const ALLOWED_SIZES = new Set(["1024x1024", "1024x1536", "1536x1024"]);
 // classifierLabel is a free-form ImageNet label — strip to safe chars, cap length
 function sanitizeClassifierLabel(raw: string | null): string | null {
   if (!raw) return null;
@@ -157,11 +162,7 @@ function sanitizeClassifierLabel(raw: string | null): string | null {
   return cleaned || null;
 }
 
-// Per-IP in-memory rate limiter — fixed window, resets each WINDOW_MS interval.
-// Note: in-memory only, so limits are per-process. Sufficient for single-instance deployments.
-const RATE_LIMIT_MAX = 10;          // max requests per window per IP
-const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const _rateStore = new Map<string, { count: number; windowStart: number }>();
+import { checkRateLimit } from "../../lib/rateLimit";
 
 function getClientIp(req: Request): string {
   const forwarded = req.headers.get("x-forwarded-for");
@@ -169,21 +170,6 @@ function getClientIp(req: Request): string {
   const realIp = req.headers.get("x-real-ip");
   if (realIp) return realIp.trim();
   return "unknown";
-}
-
-function checkRateLimit(ip: string): { allowed: boolean; retryAfterSec: number } {
-  const now = Date.now();
-  const entry = _rateStore.get(ip);
-  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
-    _rateStore.set(ip, { count: 1, windowStart: now });
-    return { allowed: true, retryAfterSec: 0 };
-  }
-  if (entry.count >= RATE_LIMIT_MAX) {
-    const retryAfterSec = Math.ceil((RATE_LIMIT_WINDOW_MS - (now - entry.windowStart)) / 1000);
-    return { allowed: false, retryAfterSec };
-  }
-  entry.count++;
-  return { allowed: true, retryAfterSec: 0 };
 }
 
 export async function POST(req: Request) {
@@ -210,6 +196,8 @@ export async function POST(req: Request) {
     const caption = (form.get("caption") as string) || "";
     const qualityRaw = (form.get("quality") as string) || "low";
     const quality = ALLOWED_QUALITIES.has(qualityRaw) ? qualityRaw : "low";
+    const sizeRaw = (form.get("size") as string) || DEFAULT_SIZE;
+    const size = ALLOWED_SIZES.has(sizeRaw) ? sizeRaw : DEFAULT_SIZE;
     const noImageFlag = (form.get("no_image") as string) === "1";
     const classifierLabel = sanitizeClassifierLabel(form.get("classifier_label") as string | null);
 
@@ -260,7 +248,7 @@ export async function POST(req: Request) {
     console.log("[generate-image] topic:", topic, "| caption:", caption);
     console.log("[generate-image] prompt:", promptBase);
 
-    const sizeUsed = DEFAULT_SIZE;
+    const sizeUsed = size;
     const costEstimate = COST_TABLE[quality] ?? COST_TABLE["medium"];
 
     // prepare form and call provider
