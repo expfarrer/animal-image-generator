@@ -1,6 +1,7 @@
 // app/api/generate-image/route.ts
 import { NextResponse } from "next/server";
 import { deflateSync } from "zlib";
+import { requireCredits } from "../../features/credits";
 
 /**
  * Generates a fully transparent RGBA PNG of the given dimensions.
@@ -188,6 +189,10 @@ export async function POST(req: Request) {
     );
   }
 
+  // Credit guard — userEmail is null until auth lands (Prompt 2).
+  // BYPASS_CREDITS=true in .env.local lets requests through during local dev.
+  // Must be removed before v4.0 is committed.
+  return requireCredits(req, null, async () => {
   try {
     const form = await req.formData();
     const file = form.get("image") as File | null;
@@ -340,7 +345,7 @@ export async function POST(req: Request) {
     const imgH = (inputBuffer as Buffer).readUInt32BE(20);
     const fd = new FormData();
     fd.append("model", DEFAULT_MODEL);
-    const blob = new Blob([inputBuffer as Buffer], {
+    const blob = new Blob([new Uint8Array(inputBuffer as Buffer)], {
       type: (file as any).type || "image/png",
     });
     fd.append("image", blob, "input.png");
@@ -443,4 +448,5 @@ export async function POST(req: Request) {
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
+  }); // end requireCredits
 }
