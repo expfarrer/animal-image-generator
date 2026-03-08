@@ -1,6 +1,6 @@
 # Animal Image Generator — v3.0
 
-A mobile-first web app that turns a pet photo into a themed AI-generated image. Upload an animal photo, pick a theme, add optional keywords, and get a styled image back in seconds — powered by OpenAI's `gpt-image-1`.
+A mobile-first web application that turns a pet photo into a themed AI-generated image. Upload an animal photo, pick a theme, add optional keywords, and get a styled image back in seconds — powered by OpenAI's `gpt-image-1`.
 
 ---
 
@@ -16,14 +16,14 @@ A mobile-first web app that turns a pet photo into a themed AI-generated image. 
 
 ## Stack
 
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 16 (App Router) |
-| Language | TypeScript |
-| Styling | Tailwind CSS v4 |
-| State | Redux Toolkit |
-| AI — image | OpenAI gpt-image-1 |
-| AI — moderation | OpenAI omni-moderation-latest |
+| Layer               | Technology                                 |
+| ------------------- | ------------------------------------------ |
+| Framework           | Next.js 16 (App Router)                    |
+| Language            | TypeScript                                 |
+| Styling             | Tailwind CSS v4                            |
+| State               | Redux Toolkit                              |
+| AI — image          | OpenAI gpt-image-1                         |
+| AI — moderation     | OpenAI omni-moderation-latest              |
 | AI — classification | TensorFlow.js / MobileNet v2 (client-side) |
 
 ---
@@ -87,12 +87,12 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Configuration
 
-| Env var | Default | Description |
-|---|---|---|
-| `OPENAI_API_KEY` | — | Required. Your OpenAI API key. |
+| Env var                 | Default | Description                                                                                                    |
+| ----------------------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`        | —       | Required. Your OpenAI API key.                                                                                 |
 | `NEXT_PUBLIC_MOBILENET` | `false` | Enables client-side animal classifier. Recommended — prevents non-animal uploads before they reach the server. |
-| `RATE_LIMIT_MAX` | `10` | Max requests per IP per window. |
-| `RATE_LIMIT_WINDOW_SEC` | `60` | Rate limit window in seconds. |
+| `RATE_LIMIT_MAX`        | `10`    | Max requests per IP per window.                                                                                |
+| `RATE_LIMIT_WINDOW_SEC` | `60`    | Rate limit window in seconds.                                                                                  |
 
 ---
 
@@ -121,20 +121,20 @@ A live server stats page is available at [/stats](http://localhost:3000/stats). 
 
 ## Themes
 
-| Theme | Behaviour |
-|---|---|
-| Celebration | Festive scene with confetti and a banner using your keywords |
-| Memorial | Soft-toned portrait with gentle light and floral elements |
-| Retirement | Party hat, small cake, warm whimsical tones |
-| Fantasy | Glowing wings, magical light, painterly style |
-| Keywords only | Your keywords become the entire prompt — no template added |
+| Theme         | Behaviour                                                    |
+| ------------- | ------------------------------------------------------------ |
+| Celebration   | Festive scene with confetti and a banner using your keywords |
+| Memorial      | Soft-toned portrait with gentle light and floral elements    |
+| Retirement    | Party hat, small cake, warm whimsical tones                  |
+| Fantasy       | Glowing wings, magical light, painterly style                |
+| Keywords only | Your keywords become the entire prompt — no template added   |
 
 ---
 
 ## Version history
 
-| Version | Notes |
-|---|---|
-| 3.0 | Size selector, Keywords-only theme, profanity filter fix (whole-word), stats page, timer fix, session counter hydration fix, rate limit env vars, prompt display |
-| 2.9 | Quality UI hidden (locked to medium), size wired end-to-end |
-| 2.3 | Core generation flow, moderation, MobileNet classifier, rate limiting, session cap |
+| Version | Notes                                                                                                                                                            |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3.0     | Size selector, Keywords-only theme, profanity filter fix (whole-word), stats page, timer fix, session counter hydration fix, rate limit env vars, prompt display |
+| 2.9     | Quality UI hidden (locked to medium), size wired end-to-end                                                                                                      |
+| 2.3     | Core generation flow, moderation, MobileNet classifier, rate limiting, session cap                                                                               |
