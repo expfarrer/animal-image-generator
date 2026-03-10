@@ -25,7 +25,7 @@ export default function RootLayout({
           pointerEvents: "none",
           userSelect: "none",
         }}>
-          v2.3
+          v3.0
         </div>
       </body>
     </html>
