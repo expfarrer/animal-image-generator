@@ -5,6 +5,7 @@
 
 import { stripe, priceIdToCredits } from "../lib/stripe";
 import Link from "next/link";
+import CreditInitializer from "./CreditInitializer";
 
 interface Props {
   searchParams: Promise<{ session_id?: string }>;
@@ -61,6 +62,9 @@ export default async function SuccessPage({ searchParams }: Props) {
         <p className="text-xs text-slate-400">
           Credits are ready to use. Each generation uses 1 credit.
         </p>
+
+        {/* Stores credits in localStorage so the generator can show the counter */}
+        {credits !== null && <CreditInitializer credits={credits} />}
 
         <Link
           href="/"

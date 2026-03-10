@@ -154,6 +154,16 @@ const TOPICS = [
   { id: "keywords", label: "Keywords only" },
 ];
 
+// Quick-pick styles shown after a result — clicking generates immediately with same photo.
+const STYLE_REMIXES = [
+  { label: "Fantasy",  caption: "fantasy magical glowing wings ethereal" },
+  { label: "Angel",    caption: "angel wings divine celestial golden light" },
+  { label: "Birthday", caption: "birthday party hat confetti celebration" },
+  { label: "Royal",    caption: "royal portrait crown majestic regal" },
+] as const;
+
+const LS_CREDITS_KEY = "aig_credits";
+
 export default function ImageGeneratorForm() {
   const dispatch = useAppDispatch();
   const {
@@ -236,6 +246,15 @@ export default function ImageGeneratorForm() {
   }
   const genRemaining = SESSION_CAP - genCount;
   const sessionCapReached = genCount >= SESSION_CAP;
+
+  // Credits from localStorage (set by CreditInitializer on /success).
+  // null = no purchase recorded yet (falls back to session-cap UX).
+  // Replaced by real API call when auth lands in Prompt 3.
+  const [credits, setCredits] = useState<number | null>(null);
+  useEffect(() => {
+    const stored = parseInt(localStorage.getItem(LS_CREDITS_KEY) ?? "", 10);
+    if (!isNaN(stored)) setCredits(stored);
+  }, []);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   // Prevents concurrent onFile executions if user taps file picker twice rapidly
@@ -372,12 +391,13 @@ export default function ImageGeneratorForm() {
   }
 
   // core submit function: sends image+prompt to server (or no_image on retry)
-  async function submit(forceProceed = false, noImage = false) {
+  async function submit(forceProceed = false, noImage = false, captionOverride?: string) {
     if (!preview && !noImage) {
       dispatch(setStatus("Please select an image"));
       return;
     }
-    const detected = containsBlockedTerm(caption);
+    const captionToUse = captionOverride ?? caption;
+    const detected = containsBlockedTerm(captionToUse);
     if (detected) {
       setBlockedWord(detected);
       setCaptionError("Keywords contain inappropriate content. Please edit and try again.");
@@ -413,7 +433,7 @@ export default function ImageGeneratorForm() {
     if (!noImage && uploadBlob)
       fd.append("image", uploadBlob, originalFileName);
     fd.append("topic", topic);
-    fd.append("caption", caption || "");
+    fd.append("caption", captionToUse || "");
     // POC: locked to medium ($0.07/image) — restore dynamic value for V1
     fd.append("quality", "medium");
     fd.append("size", size);
@@ -496,6 +516,13 @@ export default function ImageGeneratorForm() {
       removeToast(genToastId);
       if (json.url) persistResult(json.url, json.cost_usd ?? null);
       incrementGenCount();
+      // Decrement credit counter
+      setCredits((prev) => {
+        if (prev === null) return null;
+        const next = Math.max(0, prev - 1);
+        localStorage.setItem(LS_CREDITS_KEY, String(next));
+        return next;
+      });
       const providerSec = json.latency_ms
         ? (json.latency_ms / 1000).toFixed(2) + "s"
         : "—";
@@ -535,6 +562,25 @@ export default function ImageGeneratorForm() {
     setIdenticalDetected(false);
   }
 
+  // Keeps the current photo, clears the result so controls reappear.
+  function generateAnother() {
+    dispatch(setResult({ url: null, latency: null, cost: null }));
+    clearPersistedResult();
+    setServerModel(null);
+    setServerSizeNote(null);
+    setServerSizeUsed(null);
+    setServerPromptUsed(null);
+    setServerImageDimensions(null);
+    setIdenticalDetected(false);
+  }
+
+  // Immediately generates with the same photo using a preset style caption.
+  function handleStyleRemix(style: { label: string; caption: string }) {
+    generateAnother();
+    dispatch(setCaption(style.caption));
+    submit(false, false, style.caption);
+  }
+
   // What to show in the image area:
   // result (if ready) → preview (if uploaded) → empty tap-to-upload
   const displayUrl = resultUrl || preview;
@@ -545,9 +591,14 @@ export default function ImageGeneratorForm() {
 
       <div className="min-h-screen bg-slate-100 flex flex-col">
         {/* Header */}
-        <header className="bg-slate-100 px-4 pt-12 pb-2 text-center">
+        <header className="bg-slate-100 px-4 pt-12 pb-2 text-center relative">
           <h1 className="text-xl font-bold text-slate-900">Animal Image Generator</h1>
           <p className="text-sm text-slate-500 mt-0.5">Upload a pet photo · pick a theme · generate</p>
+          {credits !== null && (
+            <span className="absolute right-4 bottom-2 bg-white rounded-full px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm whitespace-nowrap">
+              {credits} credits left
+            </span>
+          )}
         </header>
 
         <div className="flex-1 flex flex-col gap-3 p-4 pb-10 max-w-lg mx-auto w-full">
@@ -626,33 +677,57 @@ export default function ImageGeneratorForm() {
             )}
           </div>
 
-          {/* Save + New — shown below the image once result is ready */}
-          {resultUrl && !loading && (
-            <div className="flex gap-3">
-              <a
-                href={resultUrl}
-                download
-                className="flex-1 text-center py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold"
-              >
-                ↓ Save image
-              </a>
-              <button
-                onClick={clearSelection}
-                className="flex-1 py-4 rounded-2xl bg-slate-200 text-slate-800 text-base font-semibold"
-              >
-                New photo
-              </button>
-            </div>
-          )}
-
           {/* Classifier badge */}
-          {predictions && predictions.length > 0 && (
+          {!resultUrl && predictions && predictions.length > 0 && (
             <div className={`text-center text-xs font-medium px-3 py-1.5 rounded-full self-center ${isAnimal ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
               {predictions[0].className.split(",")[0]} · {(predictions[0].probability * 100).toFixed(0)}% confidence
             </div>
           )}
 
-          {/* ── Controls ── */}
+          {resultUrl && !loading ? (
+            /* ── Result view ── */
+            <div className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-3">
+              <div>
+                <p className="text-base font-bold text-slate-900">Your Image Is Ready</p>
+                <p className="text-sm text-slate-500">Download it or generate another style.</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={generateAnother}
+                className="w-full py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold active:bg-indigo-700"
+              >
+                Generate Another
+              </button>
+
+              <a
+                href={resultUrl}
+                download
+                className="w-full text-center py-4 rounded-2xl border border-slate-200 text-slate-800 text-base font-semibold"
+              >
+                Download
+              </a>
+
+              {/* Style remixes */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Try another style</p>
+                <div className="flex gap-2 flex-wrap">
+                  {STYLE_REMIXES.map((s) => (
+                    <button
+                      key={s.label}
+                      type="button"
+                      onClick={() => handleStyleRemix(s)}
+                      disabled={credits === 0}
+                      className="px-4 py-2 rounded-full text-sm font-medium bg-slate-100 text-slate-700 disabled:opacity-40"
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+          /* ── Controls ── */
           <div className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-3">
 
             {/* Theme */}
@@ -767,26 +842,33 @@ export default function ImageGeneratorForm() {
             <button
               type="button"
               onClick={() => submit(false, false)}
-              disabled={loading || !!captionError || !preview || sessionCapReached}
+              disabled={loading || !!captionError || !preview || sessionCapReached || credits === 0}
               className={`w-full py-4 rounded-2xl text-base font-semibold transition-colors ${
-                loading || captionError || !preview || sessionCapReached
+                loading || captionError || !preview || sessionCapReached || credits === 0
                   ? "bg-slate-200 text-slate-400"
                   : "bg-indigo-600 text-white active:bg-indigo-700"
               }`}
             >
               {loading ? "Generating…" : "Generate"}
             </button>
-            {sessionCapReached && (
+            {credits === 0 && (
+              <div className="text-center">
+                <p className="text-xs text-red-600 font-medium">You have no credits left.</p>
+                <a href="/pricing" className="text-xs text-indigo-600 underline underline-offset-2">Buy more credits</a>
+              </div>
+            )}
+            {credits !== 0 && sessionCapReached && (
               <p className="text-center text-xs text-red-600 font-medium">
                 Session limit reached ({SESSION_CAP} generations). Close and reopen the tab to continue.
               </p>
             )}
-            {!sessionCapReached && genRemaining <= 3 && genRemaining > 0 && (
+            {credits !== 0 && !sessionCapReached && genRemaining <= 3 && genRemaining > 0 && (
               <p className="text-center text-xs text-amber-600">
                 {genRemaining} generation{genRemaining === 1 ? "" : "s"} remaining this session
               </p>
             )}
           </div>
+          )} {/* end controls/result conditional */}
 
           {/* Identical output fallback */}
           {identicalDetected && (
