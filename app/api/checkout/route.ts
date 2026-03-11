@@ -23,10 +23,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "invalid priceId" }, { status: 400 });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
     if (!process.env.NEXT_PUBLIC_BASE_URL && process.env.NODE_ENV === "production") {
-      console.error("[checkout] NEXT_PUBLIC_BASE_URL is not set in production — Stripe redirects will point to localhost.");
+      console.error("[checkout] NEXT_PUBLIC_BASE_URL is not set — refusing to create Stripe session with localhost redirect URLs.");
+      return NextResponse.json({ error: "Checkout is unavailable. Please try again later." }, { status: 500 });
     }
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",

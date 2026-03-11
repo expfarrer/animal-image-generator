@@ -87,7 +87,7 @@ function ErrorState({ message }: { message: string }) {
       <div className="bg-white rounded-2xl shadow-sm p-8 max-w-sm w-full text-center flex flex-col gap-4">
         <p className="text-sm text-slate-600">{message}</p>
         <Link href="/" className="text-sm text-indigo-600 underline underline-offset-2">
-          Back to generator
+          Back to home
         </Link>
       </div>
     </div>
