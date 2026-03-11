@@ -15,6 +15,8 @@ export interface Tier {
 }
 
 export default function PricingClient({ tiers }: { tiers: Tier[] }) {
+  const defaultId = tiers.find((t) => t.badge)?.priceId ?? tiers[0]?.priceId ?? null;
+  const [selectedId, setSelectedId] = useState<string | null>(defaultId);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,8 +52,9 @@ export default function PricingClient({ tiers }: { tiers: Tier[] }) {
           {tiers.map((tier) => (
             <div
               key={tier.priceId}
-              className={`relative flex-1 bg-white rounded-2xl shadow-sm p-6 flex flex-col gap-3 ${
-                tier.badge ? "ring-2 ring-indigo-500" : ""
+              onClick={() => setSelectedId(tier.priceId)}
+              className={`relative flex-1 bg-white rounded-2xl shadow-sm p-6 flex flex-col gap-3 cursor-pointer ${
+                selectedId === tier.priceId ? "ring-2 ring-indigo-500" : ""
               }`}
             >
               {tier.badge && (
@@ -77,7 +80,7 @@ export default function PricingClient({ tiers }: { tiers: Tier[] }) {
                 onClick={() => handleCheckout(tier.priceId)}
                 disabled={loadingId !== null}
                 className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors ${
-                  tier.badge
+                  selectedId === tier.priceId
                     ? "bg-indigo-600 text-white active:bg-indigo-700"
                     : "bg-slate-900 text-white active:bg-slate-700"
                 } disabled:opacity-50`}

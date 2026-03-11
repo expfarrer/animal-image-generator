@@ -41,27 +41,6 @@ const TRUST = [
 // ── Theme pills ─────────────────────────────────────────────────────────────
 const THEMES = ["Celebration", "Memorial", "Retirement", "Fantasy"];
 
-// ── Example cards (photo → result transformation) ───────────────────────────
-const EXAMPLES = [
-  {
-    label: "Your photo",
-    bg: "bg-slate-700",
-    emoji: "🐾",
-    sub: "Upload any pet",
-  },
-  {
-    label: "Celebration",
-    bg: "bg-amber-500",
-    emoji: "🎉",
-    sub: "Party style",
-  },
-  {
-    label: "Fantasy",
-    bg: "bg-indigo-500",
-    emoji: "✨",
-    sub: "Magical style",
-  },
-];
 
 export default function LandingPage() {
   return (
@@ -81,23 +60,11 @@ export default function LandingPage() {
       {/* ── Example visual ─────────────────────────────────────────────────── */}
       <section className="w-full max-w-lg px-4 pb-6">
         <div className="bg-white rounded-2xl shadow-sm p-4">
-          <div className="flex items-center justify-center gap-2">
-            {EXAMPLES.map((ex, i) => (
-              <div key={ex.label} className="flex items-center gap-2">
-                <div className="flex flex-col items-center gap-1.5">
-                  <div className={`w-20 h-20 sm:w-24 sm:h-24 rounded-xl ${ex.bg} flex items-center justify-center text-3xl`}>
-                    {ex.emoji}
-                  </div>
-                  <span className="text-xs font-medium text-slate-500">{ex.label}</span>
-                </div>
-                {i < EXAMPLES.length - 1 && (
-                  <svg className="w-4 h-4 text-slate-300 flex-shrink-0 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                )}
-              </div>
-            ))}
-          </div>
+          <img
+            src="/progress.jpg"
+            alt="Example pet image transformation"
+            className="mx-auto max-w-full h-auto rounded-xl object-contain"
+          />
         </div>
       </section>
 
