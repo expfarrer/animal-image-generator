@@ -94,7 +94,7 @@ export default function PricingClient({ tiers }: { tiers: Tier[] }) {
 
         <p className="text-xs text-slate-400 text-center mt-2">
           Payments processed securely by Stripe ·{" "}
-          <a href="/" className="underline underline-offset-2">
+          <a href="/generator" className="underline underline-offset-2">
             Back to generator
           </a>
         </p>

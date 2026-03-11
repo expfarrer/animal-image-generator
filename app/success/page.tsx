@@ -67,7 +67,7 @@ export default async function SuccessPage({ searchParams }: Props) {
         {credits !== null && <CreditInitializer credits={credits} />}
 
         <Link
-          href="/"
+          href="/generator"
           className="w-full py-3.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl text-center"
         >
           Start generating →
