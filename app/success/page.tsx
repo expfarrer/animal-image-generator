@@ -5,7 +5,7 @@
 
 import { stripe, priceIdToCredits } from "../lib/stripe";
 import Link from "next/link";
-import CreditInitializer from "./CreditInitializer";
+import SuccessCreditApplier from "./SuccessCreditApplier";
 
 interface Props {
   searchParams: Promise<{ session_id?: string }>;
@@ -55,7 +55,7 @@ export default async function SuccessPage({ searchParams }: Props) {
         {credits !== null && (
           <div className="bg-indigo-50 rounded-xl px-4 py-3">
             <p className="text-3xl font-bold text-indigo-600">{credits}</p>
-            <p className="text-sm text-slate-600 mt-0.5">image credits added to your account</p>
+            <p className="text-sm text-slate-600 mt-0.5">image credits ready to use</p>
           </div>
         )}
 
@@ -63,8 +63,8 @@ export default async function SuccessPage({ searchParams }: Props) {
           Credits are ready to use. Each generation uses 1 credit.
         </p>
 
-        {/* Stores credits in localStorage so the generator can show the counter */}
-        {credits !== null && <CreditInitializer credits={credits} sessionId={session_id} />}
+        {/* Triggers server-side credit application and sets the guest session cookie */}
+        {credits !== null && <SuccessCreditApplier sessionId={session_id} />}
 
         <Link
           href="/generator"

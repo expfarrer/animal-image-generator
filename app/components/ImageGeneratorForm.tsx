@@ -162,7 +162,7 @@ const STYLE_REMIXES = [
   { label: "Royal",    caption: "royal portrait crown majestic regal" },
 ] as const;
 
-const LS_CREDITS_KEY = "aig_credits";
+// LS_CREDITS_KEY removed — credits now fetched from /api/credits (server-side guest session)
 
 export default function ImageGeneratorForm() {
   const dispatch = useAppDispatch();
@@ -247,13 +247,18 @@ export default function ImageGeneratorForm() {
   const genRemaining = SESSION_CAP - genCount;
   const sessionCapReached = genCount >= SESSION_CAP;
 
-  // Credits from localStorage (set by CreditInitializer on /success).
-  // null = no purchase recorded yet (falls back to session-cap UX).
-  // Replaced by real API call when auth lands in Prompt 3.
+  // Credits fetched from /api/credits (server-side guest session in KV).
+  // null = no guest session cookie found (no purchase recorded); session cap governs.
+  // 0   = guest session exists but credits exhausted; zero-credit UX shown.
   const [credits, setCredits] = useState<number | null>(null);
   useEffect(() => {
-    const stored = parseInt(localStorage.getItem(LS_CREDITS_KEY) ?? "", 10);
-    if (!isNaN(stored)) setCredits(stored);
+    fetch("/api/credits")
+      .then((r) => r.json())
+      .then((data) => {
+        if (typeof data.credits === "number") setCredits(data.credits);
+        // null response → credits stays null → session cap governs
+      })
+      .catch(() => {}); // fail silently — session cap still applies as fallback
   }, []);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -464,6 +469,13 @@ export default function ImageGeneratorForm() {
         const errJson = await res.json().catch(() => null);
         const msg = errJson?.detail ?? errJson?.error ?? "Generation failed.";
         addToast(typeof msg === "string" ? msg : JSON.stringify(msg), "error");
+        // Re-sync credit counter if server reports insufficient credits
+        // (handles stale client state from multiple tabs or manual manipulation)
+        if (res.status === 402) {
+          fetch("/api/credits").then((r) => r.json()).then((data) => {
+            if (typeof data.credits === "number") setCredits(data.credits);
+          }).catch(() => {});
+        }
         dispatch(setLoading(false));
         return;
       }
@@ -516,12 +528,10 @@ export default function ImageGeneratorForm() {
       removeToast(genToastId);
       if (json.url) persistResult(json.url, json.cost_usd ?? null);
       incrementGenCount();
-      // Decrement credit counter
+      // Decrement local credit counter (server already deducted atomically)
       setCredits((prev) => {
         if (prev === null) return null;
-        const next = Math.max(0, prev - 1);
-        localStorage.setItem(LS_CREDITS_KEY, String(next));
-        return next;
+        return Math.max(0, prev - 1);
       });
       const providerSec = json.latency_ms
         ? (json.latency_ms / 1000).toFixed(2) + "s"

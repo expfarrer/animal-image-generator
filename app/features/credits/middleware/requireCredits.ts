@@ -1,44 +1,46 @@
 // app/features/credits/middleware/requireCredits.ts
-// Server-side credit guard. Import and apply in /api/generate-image/route.ts only.
+// Server-side credit guard. Applied in /api/generate-image/route.ts.
+//
+// Uses the guest session cookie (set by /api/apply-credits) as the server-trusted
+// identity. No email or user account required.
 //
 // Usage:
-//   return requireCredits(req, userEmail, () => handler(req));
+//   return requireCredits(req, () => handler(req));
 //
 // BYPASS_CREDITS=true in .env.local skips all checks during local development.
-// This flag MUST be removed before v4.0 is committed.
+// This flag MUST NOT be set in production — the guard below enforces this.
 
-import { getCredits, deductCredit } from "../lib/credits";
+import { getGuestCredits, deductGuestCredit } from "../lib/guestCredits";
+import { readGuestId } from "../../../lib/guestSession";
 
 export async function requireCredits(
-  _req: Request,
-  userEmail: string | null,
+  req: Request,
   handler: () => Promise<Response>,
 ): Promise<Response> {
-  // Dev bypass — lets the core generate flow run without a real KV connection.
-  // MUST NOT be enabled in production — fail loudly if it is.
+  // Dev bypass — allows local development without a real KV connection.
+  // Hard-blocked in production: logs loudly and falls through to enforcement.
   if (process.env.BYPASS_CREDITS === "true") {
     if (process.env.NODE_ENV === "production") {
       console.error(
         "[requireCredits] BYPASS_CREDITS=true is set in production. " +
-        "This is a critical misconfiguration — all credit enforcement is disabled. " +
+        "This is a critical misconfiguration — enforcing credits anyway. " +
         "Remove BYPASS_CREDITS from your production environment variables immediately.",
       );
-      // Hard-disable bypass in production rather than silently serving free generations.
-      // Fall through to normal credit enforcement below.
+      // Fall through to normal enforcement below.
     } else {
       return handler();
     }
   }
 
-  // Auth not yet wired — once auth lands, userEmail will always be populated.
-  if (!userEmail) {
+  const guestId = readGuestId(req);
+  if (!guestId) {
     return new Response(
-      JSON.stringify({ error: "unauthenticated" }),
+      JSON.stringify({ error: "No guest session found. Please complete a purchase first." }),
       { status: 401, headers: { "Content-Type": "application/json" } },
     );
   }
 
-  const balance = await getCredits(userEmail);
+  const balance = await getGuestCredits(guestId);
   if (balance <= 0) {
     return new Response(
       JSON.stringify({ error: "insufficient_credits" }),
@@ -46,9 +48,9 @@ export async function requireCredits(
     );
   }
 
-  const deducted = await deductCredit(userEmail);
+  // Atomic deduct via Lua — prevents race conditions on concurrent requests
+  const deducted = await deductGuestCredit(guestId);
   if (!deducted) {
-    // Balance hit 0 between the check and deduct (race condition caught by Lua)
     return new Response(
       JSON.stringify({ error: "insufficient_credits" }),
       { status: 402, headers: { "Content-Type": "application/json" } },

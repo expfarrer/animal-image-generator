@@ -189,10 +189,9 @@ export async function POST(req: Request) {
     );
   }
 
-  // Credit guard — userEmail is null until auth lands (Prompt 2).
+  // Credit guard — enforces guest session credits (cookie-based, no login required).
   // BYPASS_CREDITS=true in .env.local lets requests through during local dev.
-  // Must be removed before v4.0 is committed.
-  return requireCredits(req, null, async () => {
+  return requireCredits(req, async () => {
   try {
     const form = await req.formData();
     const file = form.get("image") as File | null;
