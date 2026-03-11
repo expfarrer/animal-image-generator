@@ -75,21 +75,17 @@ export default function PricingClient({ tiers }: { tiers: Tier[] }) {
               </p>
 
               <p className="text-sm text-slate-500 flex-1">{tier.description}</p>
-
-              <button
-                onClick={() => handleCheckout(tier.priceId)}
-                disabled={loadingId !== null}
-                className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors ${
-                  selectedId === tier.priceId
-                    ? "bg-indigo-600 text-white active:bg-indigo-700"
-                    : "bg-slate-900 text-white active:bg-slate-700"
-                } disabled:opacity-50`}
-              >
-                {loadingId === tier.priceId ? "Redirecting…" : "Get Started"}
-              </button>
             </div>
           ))}
         </div>
+
+        <button
+          onClick={() => selectedId && handleCheckout(selectedId)}
+          disabled={loadingId !== null || !selectedId}
+          className="w-full max-w-md py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold active:bg-indigo-700 disabled:opacity-50 transition-colors"
+        >
+          {loadingId ? "Redirecting…" : "Get Started"}
+        </button>
 
         {error && (
           <p className="text-sm text-red-600 text-center max-w-sm">{error}</p>

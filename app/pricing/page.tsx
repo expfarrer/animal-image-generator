@@ -17,7 +17,7 @@ const TIERS: Tier[] = [
   },
   {
     name: "Most Popular",
-    description: "Compare and pick your favorites.",
+    description: "Best value — more images at a lower cost per image.",
     price: "$9.99",
     credits: 12,
     priceId: process.env.STRIPE_PRICE_ID_MOST_POPULAR!,

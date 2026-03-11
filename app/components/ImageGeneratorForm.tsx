@@ -625,7 +625,7 @@ export default function ImageGeneratorForm() {
                       <circle cx="12" cy="13" r="3.5" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                     <span className="text-slate-400 text-base font-medium">Tap to upload a pet photo</span>
-                    <span className="text-slate-600 text-xs">Max {MAX_FILE_SIZE_MB}MB · JPG, PNG, HEIC</span>
+                    <span className="text-slate-600 text-xs">Max {MAX_FILE_SIZE_MB}MB · JPG or PNG</span>
                     {modelStatus === "error" && (
                       <span className="text-amber-500 text-xs">AI classifier unavailable</span>
                     )}
@@ -692,13 +692,22 @@ export default function ImageGeneratorForm() {
                 <p className="text-sm text-slate-500">Download it or generate another style.</p>
               </div>
 
-              <button
-                type="button"
-                onClick={generateAnother}
-                className="w-full py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold active:bg-indigo-700"
-              >
-                Generate Another
-              </button>
+              {credits === 0 ? (
+                <div className="text-center py-2 flex flex-col gap-1.5">
+                  <p className="text-sm font-medium text-slate-700">You've used all your credits.</p>
+                  <a href="/pricing" className="text-sm text-indigo-600 underline underline-offset-2">
+                    Buy more credits →
+                  </a>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={generateAnother}
+                  className="w-full py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold active:bg-indigo-700"
+                >
+                  Generate Another
+                </button>
+              )}
 
               <a
                 href={resultUrl}

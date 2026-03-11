@@ -15,8 +15,19 @@ export async function requireCredits(
   handler: () => Promise<Response>,
 ): Promise<Response> {
   // Dev bypass — lets the core generate flow run without a real KV connection.
+  // MUST NOT be enabled in production — fail loudly if it is.
   if (process.env.BYPASS_CREDITS === "true") {
-    return handler();
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[requireCredits] BYPASS_CREDITS=true is set in production. " +
+        "This is a critical misconfiguration — all credit enforcement is disabled. " +
+        "Remove BYPASS_CREDITS from your production environment variables immediately.",
+      );
+      // Hard-disable bypass in production rather than silently serving free generations.
+      // Fall through to normal credit enforcement below.
+    } else {
+      return handler();
+    }
   }
 
   // Auth not yet wired — once auth lands, userEmail will always be populated.

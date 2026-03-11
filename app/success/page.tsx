@@ -32,7 +32,7 @@ export default async function SuccessPage({ searchParams }: Props) {
     credits = priceId ? priceIdToCredits(priceId) : null;
   } catch (err) {
     console.error("[success] failed to retrieve session:", err);
-    return <ErrorState message="Could not load your order details. Your credits have still been added — please refresh." />;
+    return <ErrorState message="Could not verify your order details. If payment was completed, please contact support using your order email." />;
   }
 
   return (
@@ -64,7 +64,7 @@ export default async function SuccessPage({ searchParams }: Props) {
         </p>
 
         {/* Stores credits in localStorage so the generator can show the counter */}
-        {credits !== null && <CreditInitializer credits={credits} />}
+        {credits !== null && <CreditInitializer credits={credits} sessionId={session_id} />}
 
         <Link
           href="/generator"
