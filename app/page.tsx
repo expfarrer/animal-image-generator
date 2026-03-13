@@ -1,7 +1,7 @@
 // app/page.tsx — Landing page
 // Ad traffic arrives here. One job: explain the product and send users to /pricing.
 
-import Link from "next/link";
+import LandingCTA from "./components/LandingCTA";
 
 // ── Step explainer ─────────────────────────────────────────────────────────
 const STEPS = [
@@ -107,12 +107,7 @@ export default function LandingPage() {
 
       {/* ── CTA ────────────────────────────────────────────────────────────── */}
       <section className="w-full max-w-lg px-4 pb-4">
-        <Link
-          href="/pricing"
-          className="block w-full py-4 bg-indigo-600 text-white text-base font-semibold rounded-2xl text-center active:bg-indigo-700"
-        >
-          Start Creating
-        </Link>
+        <LandingCTA />
       </section>
 
       {/* ── Trust row ──────────────────────────────────────────────────────── */}
