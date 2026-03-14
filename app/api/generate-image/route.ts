@@ -164,6 +164,8 @@ function sanitizeClassifierLabel(raw: string | null): string | null {
 }
 
 import { checkRateLimit } from "../../lib/rateLimit";
+import { checkGuestRateLimit } from "../../lib/guestRateLimit";
+import { readGuestId } from "../../lib/guestSession";
 
 function getClientIp(req: Request): string {
   const forwarded = req.headers.get("x-forwarded-for");
@@ -187,6 +189,20 @@ export async function POST(req: Request) {
         },
       },
     );
+  }
+
+  // Guest session rate limit — KV-backed, 5 requests per 60 seconds per guest.
+  // Fires before any OpenAI work. Falls through silently if no guest cookie
+  // (requireCredits below will return 401 in that case anyway).
+  const guestId = readGuestId(req);
+  if (guestId) {
+    const grl = await checkGuestRateLimit(guestId);
+    if (!grl.allowed) {
+      return new Response(
+        JSON.stringify({ error: "rate_limited" }),
+        { status: 429, headers: { "Content-Type": "application/json" } },
+      );
+    }
   }
 
   // Credit guard — enforces guest session credits (cookie-based, no login required).
