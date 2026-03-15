@@ -39,7 +39,7 @@ const TRUST = [
 ];
 
 // ── Theme pills ─────────────────────────────────────────────────────────────
-const THEMES = ["Celebration", "Memorial", "Retirement", "Fantasy"];
+const THEMES = ["Celebration", "Memorial", "Love", "Patriotic", "Royal", "Fantasy"];
 
 
 export default function LandingPage() {

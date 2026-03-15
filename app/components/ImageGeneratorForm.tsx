@@ -148,18 +148,22 @@ function loadPersistedResult(): { url: string; cost: number | null } | null {
 
 const TOPICS = [
   { id: "celebration", label: "Celebration" },
-  { id: "memorial", label: "Memorial" },
-  { id: "retirement", label: "Retirement" },
-  { id: "fantasy", label: "Fantasy" },
-  { id: "keywords", label: "Keywords only" },
+  { id: "memorial",    label: "Memorial" },
+  { id: "love",        label: "Love" },
+  { id: "patriotic",   label: "Patriotic" },
+  { id: "royal",       label: "Royal Portrait" },
+  { id: "fantasy",     label: "Fantasy" },
+  { id: "custom",      label: "Custom" },
 ];
 
 // Quick-pick styles shown after a result — clicking generates immediately with same photo.
 const STYLE_REMIXES = [
-  { label: "Fantasy",  caption: "fantasy magical glowing wings ethereal" },
-  { label: "Angel",    caption: "angel wings divine celestial golden light" },
-  { label: "Birthday", caption: "birthday party hat confetti celebration" },
-  { label: "Royal",    caption: "royal portrait crown majestic regal" },
+  { label: "Fantasy",   caption: "fantasy magical glowing wings ethereal" },
+  { label: "Angel",     caption: "angel wings divine celestial golden light" },
+  { label: "Birthday",  caption: "birthday party celebration festive joyful" },
+  { label: "Royal",     caption: "royal portrait crown majestic regal" },
+  { label: "Patriotic", caption: "patriotic american flag stars red white blue" },
+  { label: "Love",      caption: "romantic hearts warm glowing light" },
 ] as const;
 
 // LS_CREDITS_KEY removed — credits now fetched from /api/credits (server-side guest session)
@@ -820,9 +824,9 @@ export default function ImageGeneratorForm() {
               </div>
             </div>
 
-            {/* Keywords */}
+            {/* Add details */}
             <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Keywords</label>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Add details (optional)</label>
               <input
                 value={caption}
                 maxLength={MAX_CAPTION_LENGTH}
@@ -832,7 +836,7 @@ export default function ImageGeneratorForm() {
                   setBlockedWord(word);
                   setCaptionError(word ? "Inappropriate content detected." : null);
                 }}
-                placeholder="e.g. golden light, garden, beloved family companion"
+                placeholder="Describe the look you want, e.g. golden light, garden, beloved family companion"
                 className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 ${captionError ? "border-red-400 focus:ring-red-400" : "border-slate-200 focus:ring-indigo-500"}`}
                 disabled={loading}
               />
