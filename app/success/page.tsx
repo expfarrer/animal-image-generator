@@ -36,7 +36,7 @@ export default async function SuccessPage({ searchParams }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-100 flex flex-col items-center pt-6 p-4">
       <div className="bg-white rounded-2xl shadow-sm p-8 max-w-sm w-full text-center flex flex-col gap-4">
         {/* Checkmark */}
         <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto">
@@ -46,8 +46,8 @@ export default async function SuccessPage({ searchParams }: Props) {
         </div>
 
         <div>
-          <p className="text-xs font-semibold text-indigo-500 uppercase tracking-widest mb-1">Animal Image Generator</p>
-          <h1 className="text-xl font-bold text-slate-900">Payment Confirmed</h1>
+          <h1 className="text-xs font-semibold text-indigo-500 uppercase tracking-widest mb-1">Animal Image Generator</h1>
+          <h2 className="text-xl font-bold text-slate-900">Payment Confirmed</h2>
           <p className="text-sm text-slate-500 mt-0.5">Your credits are ready to use.</p>
           {email && (
             <p className="text-sm text-slate-400 mt-1">Receipt sent to {email}</p>
@@ -85,7 +85,7 @@ export default async function SuccessPage({ searchParams }: Props) {
 
 function ErrorState({ message }: { message: string }) {
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-100 flex flex-col items-center pt-6 p-4">
       <div className="bg-white rounded-2xl shadow-sm p-8 max-w-sm w-full text-center flex flex-col gap-4">
         <p className="text-sm text-slate-600">{message}</p>
         <Link href="/" className="text-sm text-indigo-600 underline underline-offset-2">

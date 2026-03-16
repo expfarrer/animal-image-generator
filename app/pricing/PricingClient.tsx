@@ -4,6 +4,7 @@
 // Handles checkout button clicks and redirects to Stripe.
 
 import { useState } from "react";
+import PageHeader from "../components/PageHeader";
 
 export interface Tier {
   name: string;
@@ -42,10 +43,8 @@ export default function PricingClient({ tiers }: { tiers: Tier[] }) {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
-      <header className="px-4 pt-12 pb-2 text-center">
-        <p className="text-xs font-semibold text-indigo-500 uppercase tracking-widest mb-1">Animal Image Generator</p>
-        <h1 className="text-2xl font-bold text-slate-900">Choose Your Image Pack</h1>
-        <p className="text-sm text-slate-500 mt-1">Pick how many images you want to create.</p>
+      <header className="px-4 pt-6 pb-2 text-center">
+        <PageHeader headline="Choose Your Image Pack" description="Pick how many images you want to create." />
       </header>
 
       <div className="flex-1 flex flex-col items-center gap-4 p-4 pb-12">
@@ -54,7 +53,7 @@ export default function PricingClient({ tiers }: { tiers: Tier[] }) {
             <div
               key={tier.priceId}
               onClick={() => setSelectedId(tier.priceId)}
-              className={`relative flex-1 bg-white rounded-2xl shadow-sm p-6 flex flex-col gap-3 cursor-pointer transition-shadow ${
+              className={`relative flex-1 bg-white rounded-2xl shadow-sm p-5 flex flex-col gap-2 cursor-pointer transition-shadow ${
                 selectedId === tier.priceId
                   ? "ring-2 ring-indigo-500"
                   : "hover:ring-2 hover:ring-indigo-500/20"
