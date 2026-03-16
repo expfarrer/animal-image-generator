@@ -419,6 +419,25 @@ export default function ImageGeneratorForm() {
     processingFileRef.current = false;
   }
 
+  // Maps raw server error codes/messages to friendly user-facing copy.
+  function friendlyError(errJson: any, status: number): string {
+    const raw: string = errJson?.detail ?? errJson?.error ?? "";
+    if (raw === "rate_limited" || raw.includes("rate_limit"))
+      return "You're generating too quickly. Please wait a moment and try again.";
+    if (raw === "insufficient_credits")
+      return "You have no credits left. Buy more to continue.";
+    if (status === 401)
+      return "Session not found. Please complete a purchase first.";
+    if (status === 402)
+      return "You have no credits left. Buy more to continue.";
+    if (status === 429)
+      return raw.includes("wait") ? raw : "Too many requests. Please wait a moment and try again.";
+    if (status >= 500)
+      return "We're having trouble generating your image right now. Please try again.";
+    if (raw.length > 0 && raw.length < 120) return raw;
+    return "Generation failed. Please try again.";
+  }
+
   // core submit function: sends image+prompt to server (or no_image on retry)
   async function submit(forceProceed = false, noImage = false, captionOverride?: string) {
     if (!preview && !noImage) {
@@ -492,8 +511,7 @@ export default function ImageGeneratorForm() {
       if (!res.ok) {
         removeToast(genToastId);
         const errJson = await res.json().catch(() => null);
-        const msg = errJson?.detail ?? errJson?.error ?? "Generation failed.";
-        addToast(typeof msg === "string" ? msg : JSON.stringify(msg), "error");
+        addToast(friendlyError(errJson, res.status), "error");
         // Re-sync credit counter if server reports insufficient credits
         // (handles stale client state from multiple tabs or manual manipulation)
         if (res.status === 402) {
@@ -626,17 +644,16 @@ export default function ImageGeneratorForm() {
 
       <div className="min-h-screen bg-slate-100 flex flex-col">
         {/* Header */}
-        <header className="bg-slate-100 px-4 pt-12 pb-2 text-center relative">
-          <h1 className="text-xl font-bold text-slate-900">Animal Image Generator</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Upload a pet photo · pick a theme · generate</p>
+        <header className="bg-slate-100 px-4 pt-4 pb-4 text-center">
+          <p className="text-sm text-slate-500">Upload a photo, choose a theme, and generate your image.</p>
           {credits !== null && (
-            <span className="absolute right-4 bottom-2 bg-white rounded-full px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm whitespace-nowrap">
-              {credits} credits left
+            <span className="inline-flex items-center mt-2 bg-white rounded-full px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm whitespace-nowrap">
+              {credits} credit{credits === 1 ? "" : "s"} left
             </span>
           )}
         </header>
 
-        <div className="flex-1 flex flex-col gap-3 p-4 pb-10 max-w-lg mx-auto w-full">
+        <div className="flex-1 flex flex-col gap-3 p-4 pb-10 max-w-xl mx-auto w-full">
 
           {/* ── Image area ── */}
           <div className={`relative w-full rounded-2xl overflow-hidden bg-slate-900 shadow-md ${
@@ -738,7 +755,7 @@ export default function ImageGeneratorForm() {
                 <button
                   type="button"
                   onClick={generateAnother}
-                  className="w-full py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold active:bg-indigo-700"
+                  className="w-full py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold hover:opacity-80 active:bg-indigo-700 cursor-pointer transition-opacity"
                 >
                   Generate Another
                 </button>
@@ -762,7 +779,7 @@ export default function ImageGeneratorForm() {
                       type="button"
                       onClick={() => handleStyleRemix(s)}
                       disabled={credits === 0}
-                      className="px-4 py-2 rounded-full text-sm font-medium bg-slate-100 text-slate-700 disabled:opacity-40"
+                      className="px-4 py-2 rounded-full text-sm font-medium bg-slate-100 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                     >
                       {s.label}
                     </button>
@@ -784,7 +801,7 @@ export default function ImageGeneratorForm() {
                     type="button"
                     onClick={() => dispatch(setTopic(t.id))}
                     disabled={loading}
-                    className={`px-4 py-2.5 rounded-full text-sm font-medium transition-colors ${
+                    className={`px-4 py-2.5 rounded-full text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed ${
                       topic === t.id
                         ? "bg-indigo-600 text-white"
                         : "bg-slate-100 text-slate-700"
@@ -836,10 +853,10 @@ export default function ImageGeneratorForm() {
                             selected ? prev.filter((b) => b !== bean) : [...prev, bean],
                           )
                         }
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${
                           selected
                             ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-400"
-                            : "bg-slate-100 text-slate-600 disabled:opacity-40"
+                            : "bg-slate-100 text-slate-600"
                         }`}
                       >
                         {bean}
@@ -901,7 +918,7 @@ export default function ImageGeneratorForm() {
                     type="button"
                     onClick={() => dispatch(setSize(s.id))}
                     disabled={loading}
-                    className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-colors ${
+                    className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed ${
                       size === s.id
                         ? "bg-indigo-600 text-white"
                         : "bg-slate-100 text-slate-700"
@@ -918,10 +935,10 @@ export default function ImageGeneratorForm() {
               type="button"
               onClick={() => submit(false, false)}
               disabled={loading || !!captionError || !preview || sessionCapReached || credits === 0}
-              className={`w-full py-4 rounded-2xl text-base font-semibold transition-colors ${
+              className={`w-full py-4 rounded-2xl text-base font-semibold transition-opacity cursor-pointer disabled:cursor-not-allowed ${
                 loading || captionError || !preview || sessionCapReached || credits === 0
                   ? "bg-slate-200 text-slate-400"
-                  : "bg-indigo-600 text-white active:bg-indigo-700"
+                  : "bg-indigo-600 text-white hover:opacity-80 active:bg-indigo-700"
               }`}
             >
               {loading ? "Generating…" : "Generate"}
@@ -953,14 +970,14 @@ export default function ImageGeneratorForm() {
                 <button
                   onClick={() => submit(false, true)}
                   disabled={loading}
-                  className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-medium"
+                  className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-medium cursor-pointer disabled:cursor-not-allowed"
                 >
                   Prompt only
                 </button>
                 <button
                   onClick={clearSelection}
                   disabled={loading}
-                  className="py-3 px-4 border border-slate-300 rounded-xl text-sm text-slate-700"
+                  className="py-3 px-4 border border-slate-300 rounded-xl text-sm text-slate-700 cursor-pointer disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>

@@ -40,7 +40,7 @@ export default function LandingCTA() {
       <button
         onClick={handleClick}
         disabled={loading}
-        className="w-full py-4 bg-indigo-600 text-white text-base font-semibold rounded-2xl text-center active:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
+        className="w-full py-4 bg-indigo-600 text-white text-base font-semibold rounded-2xl text-center hover:opacity-80 active:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer transition-opacity"
       >
         {loading ? "..." : hasCredits ? "Continue Creating" : "Start Creating"}
       </button>

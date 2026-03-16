@@ -46,9 +46,11 @@ export default async function SuccessPage({ searchParams }: Props) {
         </div>
 
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Payment confirmed!</h1>
+          <p className="text-xs font-semibold text-indigo-500 uppercase tracking-widest mb-1">Animal Image Generator</p>
+          <h1 className="text-xl font-bold text-slate-900">Payment Confirmed</h1>
+          <p className="text-sm text-slate-500 mt-0.5">Your credits are ready to use.</p>
           {email && (
-            <p className="text-sm text-slate-500 mt-1">Receipt sent to {email}</p>
+            <p className="text-sm text-slate-400 mt-1">Receipt sent to {email}</p>
           )}
         </div>
 
@@ -68,7 +70,7 @@ export default async function SuccessPage({ searchParams }: Props) {
 
         <Link
           href="/generator"
-          className="w-full py-3.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl text-center"
+          className="w-full py-3.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl text-center hover:opacity-80 transition-opacity cursor-pointer"
         >
           Start generating →
         </Link>
