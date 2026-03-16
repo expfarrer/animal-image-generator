@@ -156,6 +156,20 @@ const TOPICS = [
   { id: "custom",      label: "Custom" },
 ];
 
+// B-level detail beans — shown as tappable chips below the theme selector.
+// Keys must match TOPICS ids. Max 3 selectable per generation.
+const BEANS: Record<string, string[]> = {
+  celebration: ["confetti", "balloons", "birthday cake", "party hat", "fireworks"],
+  memorial:    ["flowers", "soft clouds", "golden light", "candle", "rainbow bridge"],
+  love:        ["hearts", "roses", "couple portrait", "pink glow", "love banner"],
+  patriotic:   ["american flag", "stars", "fireworks", "red white blue ribbon", "hero pose"],
+  royal:       ["crown", "throne", "castle", "royal robe", "gold frame"],
+  fantasy:     ["magic glow", "dragon wings", "fairy forest", "sparkles", "floating lights"],
+  custom:      ["superhero", "pirate", "astronaut", "chef", "cowboy"],
+};
+
+const MAX_BEANS = 3;
+
 // Quick-pick styles shown after a result — clicking generates immediately with same photo.
 const STYLE_REMIXES = [
   { label: "Fantasy",   caption: "fantasy magical glowing wings ethereal" },
@@ -188,6 +202,11 @@ export default function ImageGeneratorForm() {
 
   const modelStatus = useAppSelector((s: RootState) => s.model.status);
 
+  // Clear selected beans whenever the theme changes so old-theme beans don't bleed into new theme
+  useEffect(() => {
+    setSelectedBeans([]);
+  }, [topic]);
+
   // Preload MobileNet as soon as the component mounts so it is ready when the user picks a file
   useEffect(() => {
     if (modelStatus === "idle") {
@@ -215,6 +234,7 @@ export default function ImageGeneratorForm() {
   const [serverPromptUsed, setServerPromptUsed] = useState<string | null>(null);
   const [serverImageDimensions, setServerImageDimensions] = useState<string | null>(null);
   const [identicalDetected, setIdenticalDetected] = useState<boolean>(false);
+  const [selectedBeans, setSelectedBeans] = useState<string[]>([]);
   const [captionError, setCaptionError] = useState<string | null>(null);
   const [blockedWord, setBlockedWord] = useState<string | null>(null);
 
@@ -443,6 +463,7 @@ export default function ImageGeneratorForm() {
       fd.append("image", uploadBlob, originalFileName);
     fd.append("topic", topic);
     fd.append("caption", captionToUse || "");
+    if (selectedBeans.length > 0) fd.append("beans", selectedBeans.join(", "));
     // POC: locked to medium ($0.07/image) — restore dynamic value for V1
     fd.append("quality", "medium");
     fd.append("size", size);
@@ -798,31 +819,36 @@ export default function ImageGeneratorForm() {
             </div>
             */}
 
-            {/* Size */}
-            <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Size</label>
-              <div className="flex gap-2">
-                {([
-                  { id: "1024x1024", label: "Square" },
-                  { id: "1024x1536", label: "Portrait" },
-                  { id: "1536x1024", label: "Landscape" },
-                ] as const).map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => dispatch(setSize(s.id))}
-                    disabled={loading}
-                    className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-colors ${
-                      size === s.id
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
+            {/* B-level beans */}
+            {BEANS[topic] && (
+              <div>
+                <p className="text-xs text-slate-400 mb-1.5">Choose up to {MAX_BEANS} details</p>
+                <div className="flex gap-2 flex-wrap">
+                  {BEANS[topic].map((bean) => {
+                    const selected = selectedBeans.includes(bean);
+                    return (
+                      <button
+                        key={bean}
+                        type="button"
+                        disabled={loading || (!selected && selectedBeans.length >= MAX_BEANS)}
+                        onClick={() =>
+                          setSelectedBeans((prev) =>
+                            selected ? prev.filter((b) => b !== bean) : [...prev, bean],
+                          )
+                        }
+                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                          selected
+                            ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-400"
+                            : "bg-slate-100 text-slate-600 disabled:opacity-40"
+                        }`}
+                      >
+                        {bean}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Add details */}
             <div>
@@ -858,6 +884,32 @@ export default function ImageGeneratorForm() {
                 }`}>
                   {caption.length}/{MAX_CAPTION_LENGTH}
                 </p>
+              </div>
+            </div>
+
+            {/* Size */}
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Size</label>
+              <div className="flex gap-2">
+                {([
+                  { id: "1024x1024", label: "Square" },
+                  { id: "1024x1536", label: "Portrait" },
+                  { id: "1536x1024", label: "Landscape" },
+                ] as const).map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => dispatch(setSize(s.id))}
+                    disabled={loading}
+                    className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-colors ${
+                      size === s.id
+                        ? "bg-indigo-600 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
               </div>
             </div>
 

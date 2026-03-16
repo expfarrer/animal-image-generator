@@ -233,6 +233,9 @@ export async function POST(req: Request) {
     const size = ALLOWED_SIZES.has(sizeRaw) ? sizeRaw : DEFAULT_SIZE;
     const noImageFlag = (form.get("no_image") as string) === "1";
     const classifierLabel = sanitizeClassifierLabel(form.get("classifier_label") as string | null);
+    // B-level beans: strip to safe chars, cap per-bean length to prevent injection
+    const beansRaw = (form.get("beans") as string) || "";
+    const beans = beansRaw.replace(/[^a-zA-Z0-9 ,_-]/g, "").trim().slice(0, 200);
 
     if (!file && !noImageFlag) {
       return new Response(JSON.stringify({ error: "No image uploaded" }), {
@@ -268,10 +271,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // build prompt: A-level base + user details (if any) + universal ending
+    // build prompt: A-level base + B-level beans (if any) + user details (if any) + universal ending
     const template = promptTemplates[topic] ?? promptTemplates["celebration"];
-    const promptBase = (caption ? `${template} ${caption}` : template)
-      + ` ${UNIVERSAL_PROMPT_ENDING}`;
+    const parts = [template];
+    if (beans) parts.push(beans);
+    if (caption) parts.push(caption);
+    parts.push(UNIVERSAL_PROMPT_ENDING);
+    const promptBase = parts.join(" ");
 
     console.log("[generate-image] topic:", topic, "| caption:", caption);
     console.log("[generate-image] prompt:", promptBase);
@@ -288,8 +294,11 @@ export async function POST(req: Request) {
       const textOnlyTemplate =
         (promptTemplatesTextOnly[topic] ?? promptTemplatesTextOnly["celebration"])
           .replace("{{animal}}", animalSlot);
-      const genPrompt = (caption ? `${textOnlyTemplate} ${caption}` : textOnlyTemplate)
-        + ` ${UNIVERSAL_PROMPT_ENDING}`;
+      const textParts = [textOnlyTemplate];
+      if (beans) textParts.push(beans);
+      if (caption) textParts.push(caption);
+      textParts.push(UNIVERSAL_PROMPT_ENDING);
+      const genPrompt = textParts.join(" ");
 
       console.log("[generate-image] text-only prompt:", genPrompt);
 
