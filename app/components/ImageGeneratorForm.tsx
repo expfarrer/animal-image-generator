@@ -148,18 +148,36 @@ function loadPersistedResult(): { url: string; cost: number | null } | null {
 
 const TOPICS = [
   { id: "celebration", label: "Celebration" },
-  { id: "memorial", label: "Memorial" },
-  { id: "retirement", label: "Retirement" },
-  { id: "fantasy", label: "Fantasy" },
-  { id: "keywords", label: "Keywords only" },
+  { id: "memorial",    label: "Memorial" },
+  { id: "love",        label: "Love" },
+  { id: "patriotic",   label: "Patriotic" },
+  { id: "royal",       label: "Royal Portrait" },
+  { id: "fantasy",     label: "Fantasy" },
+  { id: "custom",      label: "Custom" },
 ];
+
+// B-level detail beans — shown as tappable chips below the theme selector.
+// Keys must match TOPICS ids. Max 3 selectable per generation.
+const BEANS: Record<string, string[]> = {
+  celebration: ["confetti", "balloons", "birthday cake", "party hat", "fireworks"],
+  memorial:    ["flowers", "soft clouds", "golden light", "candle", "rainbow bridge"],
+  love:        ["hearts", "roses", "couple portrait", "pink glow", "love banner"],
+  patriotic:   ["american flag", "stars", "fireworks", "red white blue ribbon", "hero pose"],
+  royal:       ["crown", "throne", "castle", "royal robe", "gold frame"],
+  fantasy:     ["magic glow", "dragon wings", "fairy forest", "sparkles", "floating lights"],
+  custom:      ["superhero", "pirate", "astronaut", "chef", "cowboy"],
+};
+
+const MAX_BEANS = 3;
 
 // Quick-pick styles shown after a result — clicking generates immediately with same photo.
 const STYLE_REMIXES = [
-  { label: "Fantasy",  caption: "fantasy magical glowing wings ethereal" },
-  { label: "Angel",    caption: "angel wings divine celestial golden light" },
-  { label: "Birthday", caption: "birthday party hat confetti celebration" },
-  { label: "Royal",    caption: "royal portrait crown majestic regal" },
+  { label: "Fantasy",   caption: "fantasy magical glowing wings ethereal" },
+  { label: "Angel",     caption: "angel wings divine celestial golden light" },
+  { label: "Birthday",  caption: "birthday party celebration festive joyful" },
+  { label: "Royal",     caption: "royal portrait crown majestic regal" },
+  { label: "Patriotic", caption: "patriotic american flag stars red white blue" },
+  { label: "Love",      caption: "romantic hearts warm glowing light" },
 ] as const;
 
 // LS_CREDITS_KEY removed — credits now fetched from /api/credits (server-side guest session)
@@ -183,6 +201,11 @@ export default function ImageGeneratorForm() {
   } = useAppSelector((s: RootState) => s.image);
 
   const modelStatus = useAppSelector((s: RootState) => s.model.status);
+
+  // Clear selected beans whenever the theme changes so old-theme beans don't bleed into new theme
+  useEffect(() => {
+    setSelectedBeans([]);
+  }, [topic]);
 
   // Preload MobileNet as soon as the component mounts so it is ready when the user picks a file
   useEffect(() => {
@@ -211,6 +234,7 @@ export default function ImageGeneratorForm() {
   const [serverPromptUsed, setServerPromptUsed] = useState<string | null>(null);
   const [serverImageDimensions, setServerImageDimensions] = useState<string | null>(null);
   const [identicalDetected, setIdenticalDetected] = useState<boolean>(false);
+  const [selectedBeans, setSelectedBeans] = useState<string[]>([]);
   const [captionError, setCaptionError] = useState<string | null>(null);
   const [blockedWord, setBlockedWord] = useState<string | null>(null);
 
@@ -395,6 +419,25 @@ export default function ImageGeneratorForm() {
     processingFileRef.current = false;
   }
 
+  // Maps raw server error codes/messages to friendly user-facing copy.
+  function friendlyError(errJson: any, status: number): string {
+    const raw: string = errJson?.detail ?? errJson?.error ?? "";
+    if (raw === "rate_limited" || raw.includes("rate_limit"))
+      return "You're generating too quickly. Please wait a moment and try again.";
+    if (raw === "insufficient_credits")
+      return "You have no credits left. Buy more to continue.";
+    if (status === 401)
+      return "Session not found. Please complete a purchase first.";
+    if (status === 402)
+      return "You have no credits left. Buy more to continue.";
+    if (status === 429)
+      return raw.includes("wait") ? raw : "Too many requests. Please wait a moment and try again.";
+    if (status >= 500)
+      return "We're having trouble generating your image right now. Please try again.";
+    if (raw.length > 0 && raw.length < 120) return raw;
+    return "Generation failed. Please try again.";
+  }
+
   // core submit function: sends image+prompt to server (or no_image on retry)
   async function submit(forceProceed = false, noImage = false, captionOverride?: string) {
     if (!preview && !noImage) {
@@ -439,6 +482,7 @@ export default function ImageGeneratorForm() {
       fd.append("image", uploadBlob, originalFileName);
     fd.append("topic", topic);
     fd.append("caption", captionToUse || "");
+    if (selectedBeans.length > 0) fd.append("beans", selectedBeans.join(", "));
     // POC: locked to medium ($0.07/image) — restore dynamic value for V1
     fd.append("quality", "medium");
     fd.append("size", size);
@@ -467,8 +511,7 @@ export default function ImageGeneratorForm() {
       if (!res.ok) {
         removeToast(genToastId);
         const errJson = await res.json().catch(() => null);
-        const msg = errJson?.detail ?? errJson?.error ?? "Generation failed.";
-        addToast(typeof msg === "string" ? msg : JSON.stringify(msg), "error");
+        addToast(friendlyError(errJson, res.status), "error");
         // Re-sync credit counter if server reports insufficient credits
         // (handles stale client state from multiple tabs or manual manipulation)
         if (res.status === 402) {
@@ -601,17 +644,16 @@ export default function ImageGeneratorForm() {
 
       <div className="min-h-screen bg-slate-100 flex flex-col">
         {/* Header */}
-        <header className="bg-slate-100 px-4 pt-12 pb-2 text-center relative">
-          <h1 className="text-xl font-bold text-slate-900">Animal Image Generator</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Upload a pet photo · pick a theme · generate</p>
+        <header className="bg-slate-100 px-4 pt-4 pb-4 text-center">
+          <p className="text-sm text-slate-500">Upload a photo, choose a theme, and generate your image.</p>
           {credits !== null && (
-            <span className="absolute right-4 bottom-2 bg-white rounded-full px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm whitespace-nowrap">
-              {credits} credits left
+            <span className="inline-flex items-center mt-2 bg-white rounded-full px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm whitespace-nowrap">
+              {credits} credit{credits === 1 ? "" : "s"} left
             </span>
           )}
         </header>
 
-        <div className="flex-1 flex flex-col gap-3 p-4 pb-10 max-w-lg mx-auto w-full">
+        <div className="flex-1 flex flex-col gap-3 p-4 pb-10 max-w-xl mx-auto w-full">
 
           {/* ── Image area ── */}
           <div className={`relative w-full rounded-2xl overflow-hidden bg-slate-900 shadow-md ${
@@ -713,7 +755,7 @@ export default function ImageGeneratorForm() {
                 <button
                   type="button"
                   onClick={generateAnother}
-                  className="w-full py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold active:bg-indigo-700"
+                  className="w-full py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold hover:opacity-80 active:bg-indigo-700 cursor-pointer transition-opacity"
                 >
                   Generate Another
                 </button>
@@ -737,7 +779,7 @@ export default function ImageGeneratorForm() {
                       type="button"
                       onClick={() => handleStyleRemix(s)}
                       disabled={credits === 0}
-                      className="px-4 py-2 rounded-full text-sm font-medium bg-slate-100 text-slate-700 disabled:opacity-40"
+                      className="px-4 py-2 rounded-full text-sm font-medium bg-slate-100 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                     >
                       {s.label}
                     </button>
@@ -759,7 +801,7 @@ export default function ImageGeneratorForm() {
                     type="button"
                     onClick={() => dispatch(setTopic(t.id))}
                     disabled={loading}
-                    className={`px-4 py-2.5 rounded-full text-sm font-medium transition-colors ${
+                    className={`px-4 py-2.5 rounded-full text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed ${
                       topic === t.id
                         ? "bg-indigo-600 text-white"
                         : "bg-slate-100 text-slate-700"
@@ -794,35 +836,40 @@ export default function ImageGeneratorForm() {
             </div>
             */}
 
-            {/* Size */}
-            <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Size</label>
-              <div className="flex gap-2">
-                {([
-                  { id: "1024x1024", label: "Square" },
-                  { id: "1024x1536", label: "Portrait" },
-                  { id: "1536x1024", label: "Landscape" },
-                ] as const).map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => dispatch(setSize(s.id))}
-                    disabled={loading}
-                    className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-colors ${
-                      size === s.id
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
+            {/* B-level beans */}
+            {BEANS[topic] && (
+              <div>
+                <p className="text-xs text-slate-400 mb-1.5">Choose up to {MAX_BEANS} details</p>
+                <div className="flex gap-2 flex-wrap">
+                  {BEANS[topic].map((bean) => {
+                    const selected = selectedBeans.includes(bean);
+                    return (
+                      <button
+                        key={bean}
+                        type="button"
+                        disabled={loading || (!selected && selectedBeans.length >= MAX_BEANS)}
+                        onClick={() =>
+                          setSelectedBeans((prev) =>
+                            selected ? prev.filter((b) => b !== bean) : [...prev, bean],
+                          )
+                        }
+                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${
+                          selected
+                            ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-400"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {bean}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Keywords */}
+            {/* Add details */}
             <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Keywords</label>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Add details (optional)</label>
               <input
                 value={caption}
                 maxLength={MAX_CAPTION_LENGTH}
@@ -832,7 +879,7 @@ export default function ImageGeneratorForm() {
                   setBlockedWord(word);
                   setCaptionError(word ? "Inappropriate content detected." : null);
                 }}
-                placeholder="e.g. golden light, garden, beloved family companion"
+                placeholder="Describe the look you want, e.g. golden light, garden, beloved family companion"
                 className={`w-full rounded-xl border px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 ${captionError ? "border-red-400 focus:ring-red-400" : "border-slate-200 focus:ring-indigo-500"}`}
                 disabled={loading}
               />
@@ -857,15 +904,41 @@ export default function ImageGeneratorForm() {
               </div>
             </div>
 
+            {/* Size */}
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Size</label>
+              <div className="flex gap-2">
+                {([
+                  { id: "1024x1024", label: "Square" },
+                  { id: "1024x1536", label: "Portrait" },
+                  { id: "1536x1024", label: "Landscape" },
+                ] as const).map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => dispatch(setSize(s.id))}
+                    disabled={loading}
+                    className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                      size === s.id
+                        ? "bg-indigo-600 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Generate */}
             <button
               type="button"
               onClick={() => submit(false, false)}
               disabled={loading || !!captionError || !preview || sessionCapReached || credits === 0}
-              className={`w-full py-4 rounded-2xl text-base font-semibold transition-colors ${
+              className={`w-full py-4 rounded-2xl text-base font-semibold transition-opacity cursor-pointer disabled:cursor-not-allowed ${
                 loading || captionError || !preview || sessionCapReached || credits === 0
                   ? "bg-slate-200 text-slate-400"
-                  : "bg-indigo-600 text-white active:bg-indigo-700"
+                  : "bg-indigo-600 text-white hover:opacity-80 active:bg-indigo-700"
               }`}
             >
               {loading ? "Generating…" : "Generate"}
@@ -897,14 +970,14 @@ export default function ImageGeneratorForm() {
                 <button
                   onClick={() => submit(false, true)}
                   disabled={loading}
-                  className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-medium"
+                  className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-medium cursor-pointer disabled:cursor-not-allowed"
                 >
                   Prompt only
                 </button>
                 <button
                   onClick={clearSelection}
                   disabled={loading}
-                  className="py-3 px-4 border border-slate-300 rounded-xl text-sm text-slate-700"
+                  className="py-3 px-4 border border-slate-300 rounded-xl text-sm text-slate-700 cursor-pointer disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>

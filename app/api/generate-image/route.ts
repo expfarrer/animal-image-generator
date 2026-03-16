@@ -64,36 +64,49 @@ export const runtime = "nodejs";
  *   I can enable that behavior; by default the client controls whether to retry (safer).
  */
 
-// Used for the image-editing path (gpt-image-1 /images/edits):
-// references "the uploaded animal" because the model can see the photo.
+// A-level base prompts — photo editing path (gpt-image-1 /images/edits).
+// These are intentionally generic: mood, composition, atmosphere only.
+// B-level details and user-entered details are appended on top at assembly time.
 const promptTemplates: Record<string, string> = {
   celebration:
-    "A joyful, colorful celebration scene centered around the uploaded animal. Add confetti, warm sunlight, and a festive banner that reads '{{caption}}'. Photorealistic, bright, high detail.",
+    "A joyful celebratory portrait centered on the uploaded animal. Bright natural lighting, uplifting mood, warm colors, and a festive atmosphere. The animal is the clear focal point in a lively celebration scene. Photorealistic, high detail, balanced composition.",
   memorial:
-    "A respectful, soft-toned portrait of the uploaded animal with gentle light and a subtle floral arrangement. Soft vignette, cinematic film look, calm and reverent.",
-  retirement:
-    "A playful retirement-themed scene with the uploaded animal wearing a party hat and holding a small cake, warm tones, whimsical photorealism.",
+    "A calm and respectful portrait centered on the uploaded animal. Soft gentle lighting, peaceful atmosphere, and warm emotional tone. The scene feels quiet, reflective, and dignified with the animal as the focal point. Photorealistic, cinematic depth of field, high detail.",
+  love:
+    "A warm affectionate portrait centered on the uploaded animal. Soft glowing light, gentle colors, and a loving emotional atmosphere. The animal is the focus in a sweet and heartfelt scene. Photorealistic, high detail, soft depth of field.",
+  patriotic:
+    "A proud and uplifting portrait centered on the uploaded animal. Strong lighting, confident composition, and a celebratory atmosphere. The animal appears heroic and dignified in a bold scene. Photorealistic, vibrant colors, high detail.",
+  royal:
+    "A majestic formal portrait centered on the uploaded animal. Elegant lighting, refined atmosphere, and noble composition. The animal appears proud and dignified as the central subject. Highly detailed, classic portrait style, dramatic lighting.",
   fantasy:
-    "Transform the uploaded animal into a fantasy creature with glowing wings and soft magical light. Painterly, highly detailed.",
-  // Keywords-only: no theme template — the user's keywords ARE the full prompt.
-  keywords: "{{caption}}",
+    "A magical fantasy portrait centered on the uploaded animal. Soft mystical lighting, dreamlike atmosphere, and imaginative scenery. The animal appears transformed in a whimsical fantasy setting. Painterly style, high detail, cinematic composition.",
+  custom:
+    "Create an imaginative portrait centered on the uploaded animal. The scene reflects the user's description and visual ideas. The animal is the clear focal point in a creative setting. Photorealistic, high detail, balanced composition.",
 };
 
-// Used for text-only generation (/images/generations — no photo supplied).
-// Uses {{animal}} (filled from classifierLabel or "pet") instead of "the uploaded animal".
-// Caption handling is identical to promptTemplates above.
+// A-level base prompts — text-only path (/images/generations, no photo supplied).
+// Uses {{animal}} filled from classifierLabel or "pet".
 const promptTemplatesTextOnly: Record<string, string> = {
   celebration:
-    "A joyful, colorful celebration scene featuring a {{animal}} as the star. Add confetti, warm sunlight, and a festive banner that reads '{{caption}}'. Photorealistic, vibrant, high detail.",
+    "A joyful celebratory portrait of a {{animal}}. Bright natural lighting, uplifting mood, warm colors, and a festive atmosphere. The animal is the clear focal point in a lively celebration scene. Photorealistic, high detail, balanced composition.",
   memorial:
-    "A respectful, soft-toned portrait of a {{animal}} with gentle golden light and a subtle arrangement of flowers. Soft vignette, cinematic film look, calm and reverent.",
-  retirement:
-    "A whimsical retirement-themed scene with a {{animal}} wearing a party hat and holding a small cake, warm tones, playful photorealism.",
+    "A calm and respectful portrait of a {{animal}}. Soft gentle lighting, peaceful atmosphere, and warm emotional tone. The scene feels quiet, reflective, and dignified with the animal as the focal point. Photorealistic, cinematic depth of field, high detail.",
+  love:
+    "A warm affectionate portrait of a {{animal}}. Soft glowing light, gentle colors, and a loving emotional atmosphere. The animal is the focus in a sweet and heartfelt scene. Photorealistic, high detail, soft depth of field.",
+  patriotic:
+    "A proud and uplifting portrait of a {{animal}}. Strong lighting, confident composition, and a celebratory atmosphere. The animal appears heroic and dignified in a bold scene. Photorealistic, vibrant colors, high detail.",
+  royal:
+    "A majestic formal portrait of a {{animal}}. Elegant lighting, refined atmosphere, and noble composition. The animal appears proud and dignified as the central subject. Highly detailed, classic portrait style, dramatic lighting.",
   fantasy:
-    "A {{animal}} transformed into a majestic fantasy creature with glowing wings and ethereal soft light. Painterly, highly detailed, magical.",
-  // Keywords-only: no theme template — the user's keywords ARE the full prompt.
-  keywords: "{{caption}}",
+    "A magical fantasy portrait of a {{animal}}. Soft mystical lighting, dreamlike atmosphere, and imaginative scenery. The animal appears transformed in a whimsical fantasy setting. Painterly style, high detail, cinematic composition.",
+  custom:
+    "Create an imaginative portrait of a {{animal}} based on the user's description. The animal is the clear focal point in a creative setting. Photorealistic, high detail, balanced composition.",
 };
+
+// Appended to every final prompt after A-level base + user details.
+// Enforces consistent composition and subject clarity across all themes.
+const UNIVERSAL_PROMPT_ENDING =
+  "centered composition, subject facing camera, clear subject focus, natural anatomy, realistic proportions, clean details, sharp focus, professional photography";
 
 // gpt-image-1 pricing estimates (token-based; these are rough per-image approximations)
 const COST_TABLE: Record<string, number> = {
@@ -220,6 +233,9 @@ export async function POST(req: Request) {
     const size = ALLOWED_SIZES.has(sizeRaw) ? sizeRaw : DEFAULT_SIZE;
     const noImageFlag = (form.get("no_image") as string) === "1";
     const classifierLabel = sanitizeClassifierLabel(form.get("classifier_label") as string | null);
+    // B-level beans: strip to safe chars, cap per-bean length to prevent injection
+    const beansRaw = (form.get("beans") as string) || "";
+    const beans = beansRaw.replace(/[^a-zA-Z0-9 ,_-]/g, "").trim().slice(0, 200);
 
     if (!file && !noImageFlag) {
       return new Response(JSON.stringify({ error: "No image uploaded" }), {
@@ -255,15 +271,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // build prompt
-    // Templates that embed {{caption}} mid-sentence get it replaced directly.
-    // Templates without a slot get the caption appended at the end if provided.
+    // build prompt: A-level base + B-level beans (if any) + user details (if any) + universal ending
     const template = promptTemplates[topic] ?? promptTemplates["celebration"];
-    const promptBase = template.includes("{{caption}}")
-      ? template.replace("{{caption}}", caption)
-      : caption
-        ? `${template} ${caption}`
-        : template;
+    const parts = [template];
+    if (beans) parts.push(beans);
+    if (caption) parts.push(caption);
+    parts.push(UNIVERSAL_PROMPT_ENDING);
+    const promptBase = parts.join(" ");
 
     console.log("[generate-image] topic:", topic, "| caption:", caption);
     console.log("[generate-image] prompt:", promptBase);
@@ -280,11 +294,11 @@ export async function POST(req: Request) {
       const textOnlyTemplate =
         (promptTemplatesTextOnly[topic] ?? promptTemplatesTextOnly["celebration"])
           .replace("{{animal}}", animalSlot);
-      const genPrompt = textOnlyTemplate.includes("{{caption}}")
-        ? textOnlyTemplate.replace("{{caption}}", caption)
-        : caption
-          ? `${textOnlyTemplate} ${caption}`
-          : textOnlyTemplate;
+      const textParts = [textOnlyTemplate];
+      if (beans) textParts.push(beans);
+      if (caption) textParts.push(caption);
+      textParts.push(UNIVERSAL_PROMPT_ENDING);
+      const genPrompt = textParts.join(" ");
 
       console.log("[generate-image] text-only prompt:", genPrompt);
 
