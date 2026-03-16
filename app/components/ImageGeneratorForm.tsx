@@ -20,6 +20,7 @@ import {
 import { setModelStatus } from "../features/modelSlice";
 import { resizeImageFile } from "../utils/resizeImage";
 import { Toaster, type ToastItem, type ToastType } from "./Toaster";
+import PageHeader from "./PageHeader";
 
 /**
  * Replacement component:
@@ -439,7 +440,7 @@ export default function ImageGeneratorForm() {
   }
 
   // core submit function: sends image+prompt to server (or no_image on retry)
-  async function submit(forceProceed = false, noImage = false, captionOverride?: string) {
+  async function submit(forceProceed = false, noImage = false, captionOverride?: string, beansOverride?: string[]) {
     if (!preview && !noImage) {
       dispatch(setStatus("Please select an image"));
       return;
@@ -482,7 +483,8 @@ export default function ImageGeneratorForm() {
       fd.append("image", uploadBlob, originalFileName);
     fd.append("topic", topic);
     fd.append("caption", captionToUse || "");
-    if (selectedBeans.length > 0) fd.append("beans", selectedBeans.join(", "));
+    const beansToUse = beansOverride ?? selectedBeans;
+    if (beansToUse.length > 0) fd.append("beans", beansToUse.join(", "));
     // POC: locked to medium ($0.07/image) — restore dynamic value for V1
     fd.append("quality", "medium");
     fd.append("size", size);
@@ -630,8 +632,9 @@ export default function ImageGeneratorForm() {
   // Immediately generates with the same photo using a preset style caption.
   function handleStyleRemix(style: { label: string; caption: string }) {
     generateAnother();
+    setSelectedBeans([]);
     dispatch(setCaption(style.caption));
-    submit(false, false, style.caption);
+    submit(false, false, style.caption, []);
   }
 
   // What to show in the image area:
@@ -644,8 +647,8 @@ export default function ImageGeneratorForm() {
 
       <div className="min-h-screen bg-slate-100 flex flex-col">
         {/* Header */}
-        <header className="bg-slate-100 px-4 pt-4 pb-4 text-center">
-          <p className="text-sm text-slate-500">Upload a photo, choose a theme, and generate your image.</p>
+        <header className="bg-slate-100 px-4 pt-6 pb-4 text-center">
+          <PageHeader headline="Create Your Image" description="Upload a photo, choose a theme, and generate your image." />
           {credits !== null && (
             <span className="inline-flex items-center mt-2 bg-white rounded-full px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm whitespace-nowrap">
               {credits} credit{credits === 1 ? "" : "s"} left

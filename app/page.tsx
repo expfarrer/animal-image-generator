@@ -15,15 +15,15 @@ export default function LandingPage() {
     <div className="min-h-screen bg-slate-100 flex flex-col items-center">
 
       {/* ── Hero ───────────────────────────────────────────────────────────── */}
-      <section className="w-full max-w-lg px-4 pt-14 pb-6 text-center">
-        <p className="text-xs font-semibold text-indigo-500 uppercase tracking-widest mb-3">
+      <section className="w-full max-w-lg px-4 pt-6 pb-6 text-center">
+        <h1 className="text-xs font-semibold text-indigo-500 uppercase tracking-widest mb-3">
           Animal Image Generator
-        </p>
-        <h1 className="text-3xl font-bold text-slate-900 leading-tight">
-          Turn Your Pet Into Amazing Art
         </h1>
+        <h2 className="text-3xl font-bold text-slate-900 leading-tight">
+          Turn Your Pet Into Amazing Art
+        </h2>
         <p className="text-slate-500 mt-3 text-base leading-relaxed">
-          Upload a photo, choose a theme, and create your image.
+          Upload a pet photo, choose a fun theme, and create your custom image.
         </p>
       </section>
 
