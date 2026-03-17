@@ -24,6 +24,7 @@ import {
   generateGuestId,
   buildGuestCookieHeader,
 } from "../../lib/guestSession";
+import { recordTransaction } from "../../lib/ledger";
 
 export const runtime = "nodejs";
 
@@ -72,6 +73,19 @@ export async function POST(request: Request) {
   }
 
   const credits = await getGuestCredits(guestId);
+
+  // Log to ledger after balance is known so balanceAfter is accurate
+  if (!alreadyApplied) {
+    recordTransaction({
+      guestId,
+      amount: purchasedCredits,
+      type: "purchase",
+      source: "stripe_checkout",
+      reason: `Stripe checkout: ${purchasedCredits} credit${purchasedCredits === 1 ? "" : "s"} purchased`,
+      referenceId: sessionId,
+      balanceAfter: credits,
+    }).catch((err) => console.error("[ledger] purchase log failed:", err));
+  }
 
   // Always refresh the cookie on the response (creates it if new, extends TTL if existing)
   const res = NextResponse.json({ credits, applied: !alreadyApplied });

@@ -12,6 +12,7 @@
 
 import { getGuestCredits, deductGuestCredit } from "../lib/guestCredits";
 import { readGuestId } from "../../../lib/guestSession";
+import { recordTransaction } from "../../../lib/ledger";
 
 export async function requireCredits(
   req: Request,
@@ -56,6 +57,18 @@ export async function requireCredits(
       { status: 402, headers: { "Content-Type": "application/json" } },
     );
   }
+
+  // Log to ledger (best-effort — never blocks generation)
+  // balanceAfter = balance - 1; balance was read before atomic deduct above
+  recordTransaction({
+    guestId,
+    amount: -1,
+    type: "usage",
+    source: "image_generate",
+    reason: "Image generation",
+    referenceId: crypto.randomUUID(),
+    balanceAfter: balance - 1,
+  }).catch((err) => console.error("[ledger] usage log failed:", err));
 
   return handler();
 }
