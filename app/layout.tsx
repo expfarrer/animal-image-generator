@@ -17,7 +17,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <div style={{ width: "100%" }}>
-          <img src="/header-aig.svg" alt="Animal Image Generator" style={{ width: "100%", height: "auto", display: "block" }} />
+          <img src="/header-aig.png" alt="Animal Image Generator" style={{ width: "100%", height: "auto", display: "block" }} />
         </div>
         <Providers>{children}</Providers>
         <div style={{

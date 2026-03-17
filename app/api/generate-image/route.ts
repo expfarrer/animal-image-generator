@@ -80,6 +80,10 @@ const promptTemplates: Record<string, string> = {
     "A majestic formal portrait centered on the uploaded animal. Elegant lighting, refined atmosphere, and noble composition. The animal appears proud and dignified as the central subject. Highly detailed, classic portrait style, dramatic lighting.",
   fantasy:
     "A magical fantasy portrait centered on the uploaded animal. Soft mystical lighting, dreamlike atmosphere, and imaginative scenery. The animal appears transformed in a whimsical fantasy setting. Painterly style, high detail, cinematic composition.",
+  hero:
+    "Transform the uploaded animal into a heroic character. Dramatic lighting, cinematic atmosphere, powerful stance, epic composition as if the animal is a legendary hero.",
+  cartoon:
+    "Transform the uploaded animal into a cute cartoon character. Bright colors, playful expression, soft outlines, and a cheerful animated style. The animal is the clear focal point in a fun cartoon scene. High detail, polished illustration style, expressive composition.",
   custom:
     "Create an imaginative portrait centered on the uploaded animal. The scene reflects the user's description and visual ideas. The animal is the clear focal point in a creative setting. Photorealistic, high detail, balanced composition.",
 };
@@ -99,6 +103,10 @@ const promptTemplatesTextOnly: Record<string, string> = {
     "A majestic formal portrait of a {{animal}}. Elegant lighting, refined atmosphere, and noble composition. The animal appears proud and dignified as the central subject. Highly detailed, classic portrait style, dramatic lighting.",
   fantasy:
     "A magical fantasy portrait of a {{animal}}. Soft mystical lighting, dreamlike atmosphere, and imaginative scenery. The animal appears transformed in a whimsical fantasy setting. Painterly style, high detail, cinematic composition.",
+  hero:
+    "A {{animal}} portrayed as a heroic character. Dramatic cinematic lighting, epic atmosphere, powerful stance, heroic composition.",
+  cartoon:
+    "A {{animal}} illustrated as a cute cartoon character. Bright colors, playful expression, soft outlines, and a cheerful animated style. The animal is the clear focal point in a fun cartoon scene. High detail, polished illustration style, expressive composition.",
   custom:
     "Create an imaginative portrait of a {{animal}} based on the user's description. The animal is the clear focal point in a creative setting. Photorealistic, high detail, balanced composition.",
 };
@@ -233,8 +241,9 @@ export async function POST(req: Request) {
     const size = ALLOWED_SIZES.has(sizeRaw) ? sizeRaw : DEFAULT_SIZE;
     const noImageFlag = (form.get("no_image") as string) === "1";
     const classifierLabel = sanitizeClassifierLabel(form.get("classifier_label") as string | null);
-    // B-level beans: strip to safe chars, cap per-bean length to prevent injection
-    const beansRaw = (form.get("beans") as string) || "";
+    // B-level beans: strip to safe chars, cap per-bean length to prevent injection.
+    // Custom theme never uses beans — it is a pure manual-details path.
+    const beansRaw = topic === "custom" ? "" : (form.get("beans") as string) || "";
     const beans = beansRaw.replace(/[^a-zA-Z0-9 ,_-]/g, "").trim().slice(0, 200);
 
     if (!file && !noImageFlag) {

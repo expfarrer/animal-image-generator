@@ -154,6 +154,8 @@ const TOPICS = [
   { id: "patriotic",   label: "Patriotic" },
   { id: "royal",       label: "Royal Portrait" },
   { id: "fantasy",     label: "Fantasy" },
+  { id: "hero",        label: "Hero" },
+  { id: "cartoon",     label: "Cartoon" },
   { id: "custom",      label: "Custom" },
 ];
 
@@ -166,20 +168,16 @@ const BEANS: Record<string, string[]> = {
   patriotic:   ["american flag", "stars", "fireworks", "red white blue ribbon", "hero pose"],
   royal:       ["crown", "throne", "castle", "royal robe", "gold frame"],
   fantasy:     ["magic glow", "dragon wings", "fairy forest", "sparkles", "floating lights"],
-  custom:      ["superhero", "pirate", "astronaut", "chef", "cowboy"],
+  hero:        ["cape", "armor", "glowing aura", "epic mountain", "lightning", "battle sky"],
+  cartoon:     ["big eyes", "pastel colors", "storybook style", "sticker style", "kawaii cute", "toon smile"],
+  // custom: no beans — Custom is a pure manual-details theme
 };
 
 const MAX_BEANS = 3;
 
-// Quick-pick styles shown after a result — clicking generates immediately with same photo.
-const STYLE_REMIXES = [
-  { label: "Fantasy",   caption: "fantasy magical glowing wings ethereal" },
-  { label: "Angel",     caption: "angel wings divine celestial golden light" },
-  { label: "Birthday",  caption: "birthday party celebration festive joyful" },
-  { label: "Royal",     caption: "royal portrait crown majestic regal" },
-  { label: "Patriotic", caption: "patriotic american flag stars red white blue" },
-  { label: "Love",      caption: "romantic hearts warm glowing light" },
-] as const;
+// Post-generation quick-pick themes — derived from TOPICS so vocabulary stays in sync.
+// "custom" excluded intentionally: it requires user-supplied details and is awkward as a quick-pick.
+const POST_GEN_THEMES = TOPICS.filter((t) => t.id !== "custom");
 
 // LS_CREDITS_KEY removed — credits now fetched from /api/credits (server-side guest session)
 
@@ -440,7 +438,7 @@ export default function ImageGeneratorForm() {
   }
 
   // core submit function: sends image+prompt to server (or no_image on retry)
-  async function submit(forceProceed = false, noImage = false, captionOverride?: string, beansOverride?: string[]) {
+  async function submit(forceProceed = false, noImage = false, captionOverride?: string, beansOverride?: string[], topicOverride?: string) {
     if (!preview && !noImage) {
       dispatch(setStatus("Please select an image"));
       return;
@@ -481,7 +479,7 @@ export default function ImageGeneratorForm() {
     const fd = new FormData();
     if (!noImage && uploadBlob)
       fd.append("image", uploadBlob, originalFileName);
-    fd.append("topic", topic);
+    fd.append("topic", topicOverride ?? topic);
     fd.append("caption", captionToUse || "");
     const beansToUse = beansOverride ?? selectedBeans;
     if (beansToUse.length > 0) fd.append("beans", beansToUse.join(", "));
@@ -629,12 +627,13 @@ export default function ImageGeneratorForm() {
     setIdenticalDetected(false);
   }
 
-  // Immediately generates with the same photo using a preset style caption.
-  function handleStyleRemix(style: { label: string; caption: string }) {
+  // Preselects an A-level theme from the post-generation row and returns to the form.
+  // Does NOT auto-generate — user must press Generate manually.
+  function handlePostGenThemeSelect(theme: { id: string; label: string }) {
     generateAnother();
     setSelectedBeans([]);
-    dispatch(setCaption(style.caption));
-    submit(false, false, style.caption, []);
+    dispatch(setTopic(theme.id));
+    dispatch(setCaption(""));
   }
 
   // What to show in the image area:
@@ -776,15 +775,15 @@ export default function ImageGeneratorForm() {
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Try another style</p>
                 <div className="flex gap-2 flex-wrap">
-                  {STYLE_REMIXES.map((s) => (
+                  {POST_GEN_THEMES.map((t) => (
                     <button
-                      key={s.label}
+                      key={t.id}
                       type="button"
-                      onClick={() => handleStyleRemix(s)}
+                      onClick={() => handlePostGenThemeSelect(t)}
                       disabled={credits === 0}
                       className="px-4 py-2 rounded-full text-sm font-medium bg-slate-100 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                     >
-                      {s.label}
+                      {t.label}
                     </button>
                   ))}
                 </div>
