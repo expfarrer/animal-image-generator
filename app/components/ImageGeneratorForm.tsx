@@ -19,6 +19,7 @@ import {
 } from "../features/imageSlice";
 import { setModelStatus } from "../features/modelSlice";
 import { resizeImageFile } from "../utils/resizeImage";
+import { buildDownloadFilename, resultMimeFromUrl } from "../utils/downloadFilename";
 import { Toaster, type ToastItem, type ToastType } from "./Toaster";
 import PageHeader from "./PageHeader";
 
@@ -289,7 +290,9 @@ export default function ImageGeneratorForm() {
   const processingFileRef = useRef(false);
   // Stores the already-resized blob so submit doesn't need to resize again
   const resizedBlobRef = useRef<Blob | null>(null);
-  const originalFileNameRef = useRef<string>("upload.png");
+  // Tracks the actual mime type of the resized blob (image/jpeg or image/png)
+  const resizedMimeRef = useRef<string>("image/jpeg");
+  const originalFileNameRef = useRef<string>("upload");
 
   const MAX_FILE_SIZE_MB = 5;
   const PREVIEW_MAX_DIM = 1024;
@@ -358,7 +361,7 @@ export default function ImageGeneratorForm() {
     const uploadToastId = addToast("Checking your image…", "loading");
     let resized: Blob;
     try {
-      resized = await resizeImageFile(f, PREVIEW_MAX_DIM, "image/png", 0.92);
+      resized = await resizeImageFile(f, PREVIEW_MAX_DIM);
     } catch {
       resized = f;
     }
@@ -414,7 +417,8 @@ export default function ImageGeneratorForm() {
 
     // Step 4: accept — reuse the temp URL as the preview (no second createObjectURL needed)
     resizedBlobRef.current = resized;
-    originalFileNameRef.current = f.name;
+    resizedMimeRef.current = resized.type || "image/jpeg";
+    originalFileNameRef.current = f.name.replace(/\.[^.]+$/, ""); // strip extension; we'll add correct one at submit
     dispatch(setPredictions(predictions.length > 0 ? predictions : null));
     dispatch(setIsAnimal(predictions.length > 0 ? true : null));
     dispatch(setPreview({ url: tempUrl, name: f.name }));
@@ -480,8 +484,12 @@ export default function ImageGeneratorForm() {
 
     // build form
     const fd = new FormData();
-    if (!noImage && uploadBlob)
-      fd.append("image", uploadBlob, originalFileName);
+    if (!noImage && uploadBlob) {
+      const uploadMime = resizedMimeRef.current || "image/jpeg";
+      const uploadExt  = uploadMime.includes("png") ? ".png" : ".jpg";
+      const uploadFilename = (originalFileNameRef.current || "upload") + uploadExt;
+      fd.append("image", uploadBlob, uploadFilename);
+    }
     fd.append("topic", topicOverride ?? topic);
     fd.append("caption", captionToUse || "");
     const beansToUse = beansOverride ?? selectedBeans;
@@ -608,6 +616,7 @@ export default function ImageGeneratorForm() {
     }
     if (inputRef.current) inputRef.current.value = "";
     resizedBlobRef.current = null;
+    resizedMimeRef.current = "image/jpeg";
     clearPersistedResult();
     dispatch(reset());
     setServerModel(null);
@@ -710,7 +719,7 @@ export default function ImageGeneratorForm() {
 
             {/* Change photo button when preview is shown but no result yet */}
             {preview && !resultUrl && !loading && (
-              <label className={`absolute bottom-3 right-3 ${modelStatus === "loading" ? "cursor-wait opacity-50" : "cursor-pointer"}`}>
+              <label className="absolute bottom-3 right-3 cursor-pointer">
                 <span className="bg-black/50 backdrop-blur-sm text-white text-xs font-medium px-4 py-2.5 rounded-full">
                   Change
                 </span>
@@ -719,7 +728,7 @@ export default function ImageGeneratorForm() {
                   accept="image/*"
                   onChange={onFile}
                   className="sr-only"
-                  disabled={loading || modelStatus === "loading"}
+                  disabled={loading}
                 />
               </label>
             )}
@@ -759,7 +768,7 @@ export default function ImageGeneratorForm() {
 
               <a
                 href={resultUrl}
-                download
+                download={buildDownloadFilename(predictions, resultMimeFromUrl(resultUrl ?? ""))}
                 className="w-full text-center py-4 rounded-2xl border border-slate-200 text-slate-800 text-base font-semibold"
               >
                 Download

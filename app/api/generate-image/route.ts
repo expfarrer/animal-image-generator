@@ -139,14 +139,16 @@ async function fileToBuffer(file: File) {
  */
 async function moderateContent(
   imageB64: string | null,
+  imageMime: string | null,
   text: string | null,
 ): Promise<string[] | null> {
   const input: any[] = [];
   if (text) input.push({ type: "text", text });
   if (imageB64) {
+    const mime = imageMime || "image/jpeg";
     input.push({
       type: "image_url",
-      image_url: { url: `data:image/png;base64,${imageB64}` },
+      image_url: { url: `data:${mime};base64,${imageB64}` },
     });
   }
   if (input.length === 0) return null;
@@ -268,7 +270,8 @@ export async function POST(req: Request) {
     }
 
     // Moderate image and caption before doing anything expensive
-    const flaggedCategories = await moderateContent(inputB64, caption || null);
+    const inputMime = file ? ((file as any).type || "image/jpeg") : null;
+    const flaggedCategories = await moderateContent(inputB64, inputMime, caption || null);
     if (flaggedCategories) {
       console.warn("[moderation] content flagged:", flaggedCategories);
       return new Response(
@@ -379,14 +382,12 @@ export async function POST(req: Request) {
 
     // Image editing path — gpt-image-1 understands the reference image natively;
     // no mask needed for full-image style transformation.
-    const imgW = (inputBuffer as Buffer).readUInt32BE(16);
-    const imgH = (inputBuffer as Buffer).readUInt32BE(20);
+    const uploadMime = (file as any).type || "image/jpeg";
+    const uploadExt  = uploadMime.includes("png") ? ".png" : ".jpg";
     const fd = new FormData();
     fd.append("model", DEFAULT_MODEL);
-    const blob = new Blob([new Uint8Array(inputBuffer as Buffer)], {
-      type: (file as any).type || "image/png",
-    });
-    fd.append("image", blob, "input.png");
+    const blob = new Blob([new Uint8Array(inputBuffer as Buffer)], { type: uploadMime });
+    fd.append("image", blob, `input${uploadExt}`);
     fd.append("prompt", promptBase);
     fd.append("quality", quality);
     fd.append("size", sizeUsed);
@@ -431,7 +432,6 @@ export async function POST(req: Request) {
         model_used: DEFAULT_MODEL,
         size_used: sizeUsed,
         prompt_used: promptBase,
-        image_dimensions: `${imgW}x${imgH}`,
       });
     } else {
       // unexpected
@@ -452,11 +452,9 @@ export async function POST(req: Request) {
           message: "Provider returned identical image bytes",
           model_used: DEFAULT_MODEL,
           size_used: sizeUsed,
-
           latency_ms: latencyMs,
           cost_usd: costEstimate,
           prompt_used: promptBase,
-          image_dimensions: `${imgW}x${imgH}`,
         });
       } else {
         const dataUrl = `data:image/png;base64,${outB64}`;
@@ -466,9 +464,7 @@ export async function POST(req: Request) {
           cost_usd: costEstimate,
           model_used: DEFAULT_MODEL,
           size_used: sizeUsed,
-
           prompt_used: promptBase,
-          image_dimensions: `${imgW}x${imgH}`,
         });
       }
     }
