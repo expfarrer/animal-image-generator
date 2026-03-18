@@ -382,7 +382,10 @@ export default function ImageGeneratorForm() {
       });
 
       try {
-        const model = await loadMobileNet();
+        const classifierTimeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("classifier timeout")), 5000),
+        );
+        const model = await Promise.race([loadMobileNet(), classifierTimeout]);
         const preds = await model.classify(tempImg, 5);
         predictions = preds.map((p: any) => ({
           className: p.className,
@@ -390,8 +393,8 @@ export default function ImageGeneratorForm() {
         }));
         detected = isAnimalPrediction(predictions);
       } catch (err) {
-        console.error("classifier error", err);
-        detected = true; // fail open — don't block if TF.js errors mid-classify
+        console.error("classifier error (fail open):", err);
+        detected = true; // fail open — don't block if TF.js errors or times out
       }
 
       removeToast(uploadToastId);
@@ -666,24 +669,15 @@ export default function ImageGeneratorForm() {
 
             {/* Empty state: tap the whole area to upload */}
             {!displayUrl && (
-              <label className={`absolute inset-0 flex flex-col items-center justify-center gap-3 select-none ${modelStatus === "loading" ? "cursor-wait" : "cursor-pointer"}`}>
-                {modelStatus === "loading" ? (
-                  <>
-                    <div className="w-10 h-10 rounded-full border-4 border-slate-600/30 border-t-slate-400 animate-spin" />
-                    <span className="text-slate-400 text-base font-medium">Loading classifier…</span>
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h1.5l1.5-2h6l1.5 2H19a2 2 0 012 2v11a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                      <circle cx="12" cy="13" r="3.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    <span className="text-slate-400 text-base font-medium">Tap to upload a pet photo</span>
-                    <span className="text-slate-600 text-xs">Max {MAX_FILE_SIZE_MB}MB · JPG or PNG</span>
-                    {modelStatus === "error" && (
-                      <span className="text-amber-500 text-xs">AI classifier unavailable</span>
-                    )}
-                  </>
+              <label className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none cursor-pointer">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h1.5l1.5-2h6l1.5 2H19a2 2 0 012 2v11a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                  <circle cx="12" cy="13" r="3.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="text-slate-400 text-base font-medium">Tap to upload a pet photo</span>
+                <span className="text-slate-600 text-xs">Max {MAX_FILE_SIZE_MB}MB · JPG or PNG</span>
+                {modelStatus === "error" && (
+                  <span className="text-amber-500 text-xs">AI classifier unavailable</span>
                 )}
                 <input
                   ref={inputRef}
@@ -691,7 +685,7 @@ export default function ImageGeneratorForm() {
                   accept="image/*"
                   onChange={onFile}
                   className="sr-only"
-                  disabled={loading || modelStatus === "loading"}
+                  disabled={loading}
                 />
               </label>
             )}
