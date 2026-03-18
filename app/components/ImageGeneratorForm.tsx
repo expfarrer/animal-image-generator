@@ -19,6 +19,7 @@ import {
 } from "../features/imageSlice";
 import { setModelStatus } from "../features/modelSlice";
 import { resizeImageFile } from "../utils/resizeImage";
+import { buildDownloadFilename, resultMimeFromUrl } from "../utils/downloadFilename";
 import { Toaster, type ToastItem, type ToastType } from "./Toaster";
 import PageHeader from "./PageHeader";
 
@@ -289,9 +290,10 @@ export default function ImageGeneratorForm() {
   const processingFileRef = useRef(false);
   // Stores the already-resized blob so submit doesn't need to resize again
   const resizedBlobRef = useRef<Blob | null>(null);
-  const originalFileNameRef = useRef<string>("upload.png");
+  // Tracks the actual mime type of the resized blob (image/jpeg or image/png)
+  const resizedMimeRef = useRef<string>("image/jpeg");
+  const originalFileNameRef = useRef<string>("upload");
 
-  const MAX_FILE_SIZE_MB = 5;
   const PREVIEW_MAX_DIM = 1024;
 
   // useRef so async functions (submit) always read the current interval id,
@@ -333,13 +335,6 @@ export default function ImageGeneratorForm() {
     if (!f || processingFileRef.current) return;
     processingFileRef.current = true;
 
-    if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      addToast(`Image too large — maximum is ${MAX_FILE_SIZE_MB}MB.`, "error");
-      if (inputRef.current) inputRef.current.value = "";
-      processingFileRef.current = false;
-      return;
-    }
-
     if (preview) {
       try { URL.revokeObjectURL(preview); } catch {}
     }
@@ -358,7 +353,7 @@ export default function ImageGeneratorForm() {
     const uploadToastId = addToast("Checking your image…", "loading");
     let resized: Blob;
     try {
-      resized = await resizeImageFile(f, PREVIEW_MAX_DIM, "image/png", 0.92);
+      resized = await resizeImageFile(f, PREVIEW_MAX_DIM);
     } catch {
       resized = f;
     }
@@ -382,7 +377,10 @@ export default function ImageGeneratorForm() {
       });
 
       try {
-        const model = await loadMobileNet();
+        const classifierTimeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("classifier timeout")), 5000),
+        );
+        const model = await Promise.race([loadMobileNet(), classifierTimeout]);
         const preds = await model.classify(tempImg, 5);
         predictions = preds.map((p: any) => ({
           className: p.className,
@@ -390,8 +388,8 @@ export default function ImageGeneratorForm() {
         }));
         detected = isAnimalPrediction(predictions);
       } catch (err) {
-        console.error("classifier error", err);
-        detected = true; // fail open — don't block if TF.js errors mid-classify
+        console.error("classifier error (fail open):", err);
+        detected = true; // fail open — don't block if TF.js errors or times out
       }
 
       removeToast(uploadToastId);
@@ -411,7 +409,8 @@ export default function ImageGeneratorForm() {
 
     // Step 4: accept — reuse the temp URL as the preview (no second createObjectURL needed)
     resizedBlobRef.current = resized;
-    originalFileNameRef.current = f.name;
+    resizedMimeRef.current = resized.type || "image/jpeg";
+    originalFileNameRef.current = f.name.replace(/\.[^.]+$/, ""); // strip extension; we'll add correct one at submit
     dispatch(setPredictions(predictions.length > 0 ? predictions : null));
     dispatch(setIsAnimal(predictions.length > 0 ? true : null));
     dispatch(setPreview({ url: tempUrl, name: f.name }));
@@ -477,8 +476,12 @@ export default function ImageGeneratorForm() {
 
     // build form
     const fd = new FormData();
-    if (!noImage && uploadBlob)
-      fd.append("image", uploadBlob, originalFileName);
+    if (!noImage && uploadBlob) {
+      const uploadMime = resizedMimeRef.current || "image/jpeg";
+      const uploadExt  = uploadMime.includes("png") ? ".png" : ".jpg";
+      const uploadFilename = (originalFileNameRef.current || "upload") + uploadExt;
+      fd.append("image", uploadBlob, uploadFilename);
+    }
     fd.append("topic", topicOverride ?? topic);
     fd.append("caption", captionToUse || "");
     const beansToUse = beansOverride ?? selectedBeans;
@@ -605,6 +608,7 @@ export default function ImageGeneratorForm() {
     }
     if (inputRef.current) inputRef.current.value = "";
     resizedBlobRef.current = null;
+    resizedMimeRef.current = "image/jpeg";
     clearPersistedResult();
     dispatch(reset());
     setServerModel(null);
@@ -666,24 +670,15 @@ export default function ImageGeneratorForm() {
 
             {/* Empty state: tap the whole area to upload */}
             {!displayUrl && (
-              <label className={`absolute inset-0 flex flex-col items-center justify-center gap-3 select-none ${modelStatus === "loading" ? "cursor-wait" : "cursor-pointer"}`}>
-                {modelStatus === "loading" ? (
-                  <>
-                    <div className="w-10 h-10 rounded-full border-4 border-slate-600/30 border-t-slate-400 animate-spin" />
-                    <span className="text-slate-400 text-base font-medium">Loading classifier…</span>
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h1.5l1.5-2h6l1.5 2H19a2 2 0 012 2v11a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                      <circle cx="12" cy="13" r="3.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    <span className="text-slate-400 text-base font-medium">Tap to upload a pet photo</span>
-                    <span className="text-slate-600 text-xs">Max {MAX_FILE_SIZE_MB}MB · JPG or PNG</span>
-                    {modelStatus === "error" && (
-                      <span className="text-amber-500 text-xs">AI classifier unavailable</span>
-                    )}
-                  </>
+              <label className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none cursor-pointer">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h1.5l1.5-2h6l1.5 2H19a2 2 0 012 2v11a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                  <circle cx="12" cy="13" r="3.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="text-slate-400 text-base font-medium">Tap to upload a pet photo</span>
+                <span className="text-slate-600 text-xs">JPG, PNG, HEIC and more</span>
+                {modelStatus === "error" && (
+                  <span className="text-amber-500 text-xs">AI classifier unavailable</span>
                 )}
                 <input
                   ref={inputRef}
@@ -691,7 +686,7 @@ export default function ImageGeneratorForm() {
                   accept="image/*"
                   onChange={onFile}
                   className="sr-only"
-                  disabled={loading || modelStatus === "loading"}
+                  disabled={loading}
                 />
               </label>
             )}
@@ -716,7 +711,7 @@ export default function ImageGeneratorForm() {
 
             {/* Change photo button when preview is shown but no result yet */}
             {preview && !resultUrl && !loading && (
-              <label className={`absolute bottom-3 right-3 ${modelStatus === "loading" ? "cursor-wait opacity-50" : "cursor-pointer"}`}>
+              <label className="absolute bottom-3 right-3 cursor-pointer">
                 <span className="bg-black/50 backdrop-blur-sm text-white text-xs font-medium px-4 py-2.5 rounded-full">
                   Change
                 </span>
@@ -725,7 +720,7 @@ export default function ImageGeneratorForm() {
                   accept="image/*"
                   onChange={onFile}
                   className="sr-only"
-                  disabled={loading || modelStatus === "loading"}
+                  disabled={loading}
                 />
               </label>
             )}
@@ -765,7 +760,7 @@ export default function ImageGeneratorForm() {
 
               <a
                 href={resultUrl}
-                download
+                download={buildDownloadFilename(predictions, resultMimeFromUrl(resultUrl ?? ""))}
                 className="w-full text-center py-4 rounded-2xl border border-slate-200 text-slate-800 text-base font-semibold"
               >
                 Download
