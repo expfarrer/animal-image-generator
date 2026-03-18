@@ -2,21 +2,21 @@
 //
 // Generates safe, human-readable download filenames for generated images.
 //
-// Confidence ladder (MobileNet top-1 prediction):
-//   >= 0.90  → breed / most-specific label  (e.g. "pug-2026-03-17-2142.jpg")
-//   >= 0.75  → generic species              (e.g. "dog-2026-03-17-2142.jpg")
-//   < 0.75   → safe fallback               (e.g. "aig-image-2026-03-17-2142.jpg")
+// Naming logic (MobileNet top-1 prediction):
+//   1. Always try SPECIES_MAP first (safer — avoids overconfident breed mislabels)
+//   2. If no species match AND confidence >= 0.90 AND label is short/simple:
+//      → use sanitized breed label
+//   3. Otherwise → "aig-image" fallback
 //
-// Filenames are always:
+// All filenames are:
 //   - lowercase kebab-case
 //   - free of special / unsafe characters
-//   - ≤ ~50 characters (label capped at 30 chars)
-//   - timestamped as YYYY-MM-DD-HHmm (no colons, filesystem-safe)
+//   - timestamped as YYYY-MM-DD-HHmm (filesystem-safe, no colons)
 //   - extension derived from actual output mime type
 
 // Maps ImageNet label fragments → generic species name.
-// Order matters: more-specific entries must appear before broader ones
-// so that "golden retriever" maps to "dog", not something unexpected.
+// Order matters: more-specific entries must appear before broader ones.
+// Applied first at any confidence >= 0.75 — species is always preferred over breed.
 const SPECIES_MAP: [string, string][] = [
   // Dog breeds → dog
   ["retriever", "dog"], ["setter", "dog"], ["pointer", "dog"], ["spaniel", "dog"],
@@ -30,6 +30,9 @@ const SPECIES_MAP: [string, string][] = [
   ["affenpinscher", "dog"], ["pekinese", "dog"], ["papillon", "dog"],
   ["maltese", "dog"], ["shih", "dog"], ["lhasa", "dog"], ["chow", "dog"],
   ["keeshond", "dog"], ["pomeranian", "dog"],
+  // Common breeds frequently misclassified — map to species to prevent confident mislabels
+  ["pug", "dog"], ["vizsla", "dog"], ["weimaraner", "dog"],
+  ["doberman", "dog"], ["rottweiler", "dog"],
   // Cat breeds → cat
   ["tabby", "cat"], ["persian", "cat"], ["siamese", "cat"], ["burmese", "cat"],
   ["manx", "cat"], ["angora", "cat"], ["egyptian", "cat"],
@@ -80,6 +83,16 @@ function sanitizeLabel(s: string): string {
     .slice(0, 30);
 }
 
+/**
+ * True if a label segment is short and plain enough to use as a filename.
+ * Rejects multi-word (>2) and long (>25 char) labels that would be confusing
+ * or risk obscure/technical ImageNet terminology reaching users.
+ */
+function isReadableBreedLabel(segment: string): boolean {
+  if (segment.length > 25) return false;
+  return segment.trim().split(/\s+/).length <= 2;
+}
+
 /** Format a date as YYYY-MM-DD-HHmm (no colons, filesystem-safe). */
 function formatTimestamp(now: Date): string {
   const y  = now.getFullYear();
@@ -95,20 +108,20 @@ function extFromMime(mime: string): string {
   if (mime.includes("jpeg") || mime.includes("jpg")) return ".jpg";
   if (mime.includes("png"))  return ".png";
   if (mime.includes("webp")) return ".webp";
-  return ".jpg"; // gpt-image-1 default
+  return ".jpg"; // safe fallback
 }
 
 /**
  * Parse the mime type from a result URL.
  * Handles data URLs (`data:image/png;base64,...`) and HTTP URLs.
- * gpt-image-1 HTTP URLs default to PNG.
  */
 export function resultMimeFromUrl(url: string): string {
   if (url.startsWith("data:")) {
     const m = url.match(/^data:([^;,]+)/);
     if (m) return m[1];
   }
-  // For HTTP URLs from gpt-image-1, the output is always PNG
+  // gpt-image-1 currently returns PNG for all URL-format responses (non-b64_json path).
+  // If the API adds JPEG or WebP output options, update this fallback accordingly.
   return "image/png";
 }
 
@@ -128,30 +141,31 @@ export function buildDownloadFilename(
   const ext = extFromMime(resultMime);
 
   if (predictions && predictions.length > 0) {
-    const top        = predictions[0];
-    const confidence = top.probability;
-    const rawLabel   = top.className; // e.g. "pug" | "golden retriever" | "tabby, tabby cat"
-
-    if (confidence >= 0.90) {
-      // High confidence: use the most-specific label segment (first comma-delimited part)
-      const specific = sanitizeLabel(rawLabel.split(",")[0]);
-      if (specific && specific.length > 1) {
-        return `${specific}-${ts}${ext}`;
-      }
-    }
+    const top          = predictions[0];
+    const confidence   = top.probability;
+    // Use the first comma-delimited segment — the most specific part of the ImageNet label.
+    // e.g. "tabby, tabby cat" → "tabby" | "golden retriever" → "golden retriever"
+    const firstSegment = top.className.split(",")[0].trim();
+    const lower        = firstSegment.toLowerCase();
 
     if (confidence >= 0.75) {
-      // Mid confidence: map to generic species so we never mis-name a breed
-      const lower = rawLabel.toLowerCase();
+      // Step 1: Always prefer a species-level name from SPECIES_MAP.
+      // This is safer than breed: avoids confident mislabels (pug vs french bulldog, etc.)
+      // and produces clearer filenames for end users.
       for (const [keyword, species] of SPECIES_MAP) {
         if (lower.includes(keyword)) {
           return `${species}-${ts}${ext}`;
         }
       }
-      // No species match — fall back to sanitized label rather than generic fallback
-      const specific = sanitizeLabel(rawLabel.split(",")[0]);
-      if (specific && specific.length > 1) {
-        return `${specific}-${ts}${ext}`;
+
+      // Step 2: No species match — only use breed label at high confidence
+      // and only if the label is short and human-readable.
+      // Rejects multi-word technical labels and obscure ImageNet terms.
+      if (confidence >= 0.90 && isReadableBreedLabel(firstSegment)) {
+        const specific = sanitizeLabel(firstSegment);
+        if (specific && specific.length > 1) {
+          return `${specific}-${ts}${ext}`;
+        }
       }
     }
   }

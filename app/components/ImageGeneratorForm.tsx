@@ -294,7 +294,6 @@ export default function ImageGeneratorForm() {
   const resizedMimeRef = useRef<string>("image/jpeg");
   const originalFileNameRef = useRef<string>("upload");
 
-  const MAX_FILE_SIZE_MB = 5;
   const PREVIEW_MAX_DIM = 1024;
 
   // useRef so async functions (submit) always read the current interval id,
@@ -335,13 +334,6 @@ export default function ImageGeneratorForm() {
     const f = e.target.files?.[0] ?? null;
     if (!f || processingFileRef.current) return;
     processingFileRef.current = true;
-
-    if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      addToast(`Image too large — maximum is ${MAX_FILE_SIZE_MB}MB.`, "error");
-      if (inputRef.current) inputRef.current.value = "";
-      processingFileRef.current = false;
-      return;
-    }
 
     if (preview) {
       try { URL.revokeObjectURL(preview); } catch {}
@@ -684,7 +676,7 @@ export default function ImageGeneratorForm() {
                   <circle cx="12" cy="13" r="3.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 <span className="text-slate-400 text-base font-medium">Tap to upload a pet photo</span>
-                <span className="text-slate-600 text-xs">Max {MAX_FILE_SIZE_MB}MB · JPG or PNG</span>
+                <span className="text-slate-600 text-xs">JPG, PNG, HEIC and more</span>
                 {modelStatus === "error" && (
                   <span className="text-amber-500 text-xs">AI classifier unavailable</span>
                 )}
