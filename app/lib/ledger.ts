@@ -91,7 +91,8 @@ export async function getLedgerTotal(): Promise<number> {
 async function fetchTxByIds(ids: string[]): Promise<CreditTransaction[]> {
   if (ids.length === 0) return [];
   const keys = ids.map(txKey);
-  const raws = await kv.mget<string>(...keys);
+  // mget<TData extends unknown[]> requires an array type parameter, not a scalar
+  const raws = await kv.mget<(string | null)[]>(...keys);
   return (raws ?? [])
     .map((raw) => {
       if (!raw) return null;
