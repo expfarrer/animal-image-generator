@@ -20,6 +20,7 @@ import {
 import { setModelStatus } from "../features/modelSlice";
 import { resizeImageFile } from "../utils/resizeImage";
 import { buildDownloadFilename, resultMimeFromUrl } from "../utils/downloadFilename";
+import { trackEvent } from "../utils/trackEvent";
 import { Toaster, type ToastItem, type ToastType } from "./Toaster";
 import PageHeader from "./PageHeader";
 
@@ -288,6 +289,8 @@ export default function ImageGeneratorForm() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   // Prevents concurrent onFile executions if user taps file picker twice rapidly
   const processingFileRef = useRef(false);
+  // Prevents concurrent submit executions (double-tap, keyboard, race conditions)
+  const submittingRef = useRef(false);
   // Stores the already-resized blob so submit doesn't need to resize again
   const resizedBlobRef = useRef<Blob | null>(null);
   // Tracks the actual mime type of the resized blob (image/jpeg or image/png)
@@ -354,6 +357,14 @@ export default function ImageGeneratorForm() {
     let resized: Blob;
     try {
       resized = await resizeImageFile(f, PREVIEW_MAX_DIM);
+      trackEvent("image_optimized", {
+        original_size_bytes:  f.size,
+        optimized_size_bytes: resized.size,
+        size_saved_bytes:     Math.max(0, f.size - resized.size),
+        reduction_percent:    Math.round(Math.max(0, (f.size - resized.size) / f.size) * 100),
+        output_format:        resized.type,
+        had_transparency:     resized.type === "image/png",
+      });
     } catch {
       resized = f;
     }
@@ -414,6 +425,7 @@ export default function ImageGeneratorForm() {
     dispatch(setPredictions(predictions.length > 0 ? predictions : null));
     dispatch(setIsAnimal(predictions.length > 0 ? true : null));
     dispatch(setPreview({ url: tempUrl, name: f.name }));
+    trackEvent("upload_completed");
     processingFileRef.current = false;
   }
 
@@ -438,6 +450,7 @@ export default function ImageGeneratorForm() {
 
   // core submit function: sends image+prompt to server (or no_image on retry)
   async function submit(forceProceed = false, noImage = false, captionOverride?: string, beansOverride?: string[], topicOverride?: string) {
+    if (submittingRef.current) return;
     if (!preview && !noImage) {
       dispatch(setStatus("Please select an image"));
       return;
@@ -449,6 +462,8 @@ export default function ImageGeneratorForm() {
       setCaptionError("Keywords contain inappropriate content. Please edit and try again.");
       return;
     }
+    submittingRef.current = true;
+    trackEvent("generate_clicked");
     dispatch(setLoading(true));
     const genToastId = addToast(
       noImage ? "Generating from prompt…" : "Generating your image…",
@@ -572,6 +587,7 @@ export default function ImageGeneratorForm() {
         );
 
       removeToast(genToastId);
+      trackEvent("generate_success", { duration_ms: totalElapsedMs });
       if (json.url) persistResult(json.url, json.cost_usd ?? null);
       incrementGenCount();
       // Decrement local credit counter (server already deducted atomically)
@@ -595,6 +611,7 @@ export default function ImageGeneratorForm() {
       finalizeTimerAndSet(Date.now() - uploadStart);
       addToast("Generation failed. Please try again.", "error");
     } finally {
+      submittingRef.current = false;
       stopTimer();
       dispatch(setLoading(false));
     }
@@ -761,6 +778,7 @@ export default function ImageGeneratorForm() {
               <a
                 href={resultUrl}
                 download={buildDownloadFilename(predictions, resultMimeFromUrl(resultUrl ?? ""))}
+                onClick={() => trackEvent("download_clicked")}
                 className="w-full text-center py-4 rounded-2xl border border-slate-200 text-slate-800 text-base font-semibold"
               >
                 Download
