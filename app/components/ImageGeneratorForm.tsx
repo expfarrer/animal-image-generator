@@ -288,6 +288,8 @@ export default function ImageGeneratorForm() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   // Prevents concurrent onFile executions if user taps file picker twice rapidly
   const processingFileRef = useRef(false);
+  // Prevents concurrent submit executions (double-tap, keyboard, race conditions)
+  const submittingRef = useRef(false);
   // Stores the already-resized blob so submit doesn't need to resize again
   const resizedBlobRef = useRef<Blob | null>(null);
   // Tracks the actual mime type of the resized blob (image/jpeg or image/png)
@@ -438,6 +440,7 @@ export default function ImageGeneratorForm() {
 
   // core submit function: sends image+prompt to server (or no_image on retry)
   async function submit(forceProceed = false, noImage = false, captionOverride?: string, beansOverride?: string[], topicOverride?: string) {
+    if (submittingRef.current) return;
     if (!preview && !noImage) {
       dispatch(setStatus("Please select an image"));
       return;
@@ -449,6 +452,7 @@ export default function ImageGeneratorForm() {
       setCaptionError("Keywords contain inappropriate content. Please edit and try again.");
       return;
     }
+    submittingRef.current = true;
     dispatch(setLoading(true));
     const genToastId = addToast(
       noImage ? "Generating from prompt…" : "Generating your image…",
@@ -595,6 +599,7 @@ export default function ImageGeneratorForm() {
       finalizeTimerAndSet(Date.now() - uploadStart);
       addToast("Generation failed. Please try again.", "error");
     } finally {
+      submittingRef.current = false;
       stopTimer();
       dispatch(setLoading(false));
     }
