@@ -145,14 +145,9 @@ export async function getAnalyticsSummary(sinceMs?: number): Promise<AnalyticsSu
 async function fetchEventsByIds(ids: string[]): Promise<AnalyticsEvent[]> {
   if (ids.length === 0) return [];
   const keys = ids.map(eventKey);
-  const raws = await kv.mget<(string | null)[]>(...keys);
-  return (raws ?? [])
-    .map((raw) => {
-      if (!raw) return null;
-      try { return JSON.parse(raw) as AnalyticsEvent; }
-      catch { return null; }
-    })
-    .filter(Boolean) as AnalyticsEvent[];
+  // @vercel/kv auto-deserializes JSON on read, so raw values are already objects.
+  const raws = await kv.mget<(AnalyticsEvent | null)[]>(...keys);
+  return (raws ?? []).filter(Boolean) as AnalyticsEvent[];
 }
 
 function numericMean(events: AnalyticsEvent[], field: string): number | null {
