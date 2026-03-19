@@ -24,14 +24,6 @@ import { trackEvent } from "../utils/trackEvent";
 import { Toaster, type ToastItem, type ToastType } from "./Toaster";
 import PageHeader from "./PageHeader";
 
-/**
- * Replacement component:
- * - stops elapsed timer reliably by writing final elapsed into redux as soon as server responds
- * - when server indicates identical output, shows a "Generate from prompt only" button
- * - when retrying as text-only, passes 'no_image' flag and optional classifier_label
- * - preserves mobile-first layout and dark font tweaks
- */
-
 // Explicit terms to block in the caption field.
 // Intentionally not exhaustive — server-side moderation handles images and catches anything missed here.
 const BLOCKED_TERMS = [
@@ -116,21 +108,28 @@ async function loadMobileNet(): Promise<any> {
   return _modelPromise;
 }
 
+// crypto.randomUUID() requires a secure context (HTTPS / localhost).
+// This fallback covers local-IP dev access and any other non-secure contexts.
+function generateId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 const SESSION_CAP = 10;
 const STORAGE_KEY = "aig_gen_count";
 const MAX_CAPTION_LENGTH = 150;
 
 // sessionStorage key for the last generated image.
-// Survives page refresh within the same tab (typical session ~30 min).
-// Falls back silently if quota is exceeded or storage is unavailable.
 const RESULT_STORAGE_KEY = "aig_last_result";
 
 function persistResult(url: string, cost: number | null) {
   try {
-    sessionStorage.setItem(
-      RESULT_STORAGE_KEY,
-      JSON.stringify({ url, cost }),
-    );
+    sessionStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify({ url, cost }));
   } catch {
     // quota exceeded or storage blocked — silent fallback to in-memory only
   }
@@ -177,11 +176,32 @@ const BEANS: Record<string, string[]> = {
 
 const MAX_BEANS = 3;
 
-// Post-generation quick-pick themes — derived from TOPICS so vocabulary stays in sync.
-// "custom" excluded intentionally: it requires user-supplied details and is awkward as a quick-pick.
-const POST_GEN_THEMES = TOPICS.filter((t) => t.id !== "custom");
+// Fixed headline copy for the results view, keyed by theme ID.
+// Do not build this with string concatenation — use explicit per-theme copy.
+const THEME_RESULT_HEADLINES: Record<string, string> = {
+  royal:       "Your Royal Portrait is Ready",
+  celebration: "Your Celebration Portrait is Ready",
+  love:        "Your Love Portrait is Ready",
+  patriotic:   "Your Patriotic Portrait is Ready",
+  memorial:    "Your Memorial Portrait is Ready",
+  fantasy:     "Your Fantasy Portrait is Ready",
+  hero:        "Your Hero Portrait is Ready",
+  cartoon:     "Your Cartoon Portrait is Ready",
+};
 
-// LS_CREDITS_KEY removed — credits now fetched from /api/credits (server-side guest session)
+// Explore Styles entries. Structured with a stable key so icon assets can be
+// wired later without changing this shape.
+const EXPLORE_STYLES: { key: string; label: string }[] = [
+  { key: "royal",       label: "Royal" },
+  { key: "celebration", label: "Celebration" },
+  { key: "love",        label: "Love" },
+  { key: "patriotic",   label: "Patriotic" },
+  { key: "memorial",    label: "Memorial" },
+  { key: "fantasy",     label: "Fantasy" },
+  { key: "hero",        label: "Hero" },
+  { key: "cartoon",     label: "Cartoon" },
+  { key: "more",        label: "More" },
+];
 
 export default function ImageGeneratorForm() {
   const dispatch = useAppDispatch();
@@ -242,6 +262,11 @@ export default function ImageGeneratorForm() {
   const [captionError, setCaptionError] = useState<string | null>(null);
   const [blockedWord, setBlockedWord] = useState<string | null>(null);
 
+  // Result view state
+  const [showOriginal, setShowOriginal] = useState<boolean>(false);
+  const [showPrompt, setShowPrompt] = useState<boolean>(false);
+  const [copied, setCopied] = useState<boolean>(false);
+
   // Toast system
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastIdRef = useRef(0);
@@ -258,8 +283,6 @@ export default function ImageGeneratorForm() {
   }
 
   // Per-session generation counter — persists across page refreshes, resets on tab close.
-  // Initialize to 0 so server and client render identically; sync from sessionStorage
-  // after hydration to avoid a hydration mismatch when the count makes genRemaining <= 3.
   const [genCount, setGenCount] = useState<number>(0);
   useEffect(() => {
     const stored = parseInt(sessionStorage.getItem(STORAGE_KEY) ?? "0", 10) || 0;
@@ -276,49 +299,34 @@ export default function ImageGeneratorForm() {
   const sessionCapReached = genCount >= SESSION_CAP;
 
   // Credits fetched from /api/credits (server-side guest session in KV).
-  // null = no guest session cookie found (no purchase recorded); session cap governs.
-  // 0   = guest session exists but credits exhausted; zero-credit UX shown.
   const [credits, setCredits] = useState<number | null>(null);
   useEffect(() => {
     fetch("/api/credits")
       .then((r) => r.json())
       .then((data) => {
         if (typeof data.credits === "number") setCredits(data.credits);
-        // null response → credits stays null → session cap governs
       })
-      .catch(() => {}); // fail silently — session cap still applies as fallback
+      .catch(() => {});
   }, []);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
-  // Prevents concurrent onFile executions if user taps file picker twice rapidly
   const processingFileRef = useRef(false);
-  // Prevents concurrent submit executions (double-tap, keyboard, race conditions)
   const submittingRef = useRef(false);
-  // Stores the already-resized blob so submit doesn't need to resize again
   const resizedBlobRef = useRef<Blob | null>(null);
-  // Tracks the actual mime type of the resized blob (image/jpeg or image/png)
   const resizedMimeRef = useRef<string>("image/jpeg");
   const originalFileNameRef = useRef<string>("upload");
-  // Stable ID linking upload_completed → generate_clicked → generate_success/failed.
-  // Generated on each newly accepted image upload; cleared when selection is reset.
   const uploadIdRef = useRef<string | null>(null);
-  // Tracks whether generation_session_started has been fired for the current upload.
   const sessionStartedRef = useRef<boolean>(false);
 
   const PREVIEW_MAX_DIM = 1024;
 
-  // useRef so async functions (submit) always read the current interval id,
-  // avoiding the stale-closure bug where finalizeTimerAndSet saw null and
-  // never cleared the interval after the image was returned.
   const timerIdRef = useRef<number | null>(null);
 
-  // helper to compute top classifier label (if available)
   const topClassifierLabel =
     predictions && predictions.length
       ? predictions[0].className.split(",")[0]
       : null;
 
-  // start / stop elapsed timer and store to redux
   function startTimer() {
     dispatch(setElapsed(0));
     const start = Date.now();
@@ -383,11 +391,9 @@ export default function ImageGeneratorForm() {
     let detected = false;
 
     if (modelStatus === "error") {
-      // Classifier unavailable — fail open and rely on server-side moderation
       detected = true;
       removeToast(uploadToastId);
     } else {
-      // Step 2: classify using a temporary img element (never touches the DOM preview)
       const tempImg = new Image();
       await new Promise<void>((resolve) => {
         tempImg.onload = () => resolve();
@@ -408,13 +414,12 @@ export default function ImageGeneratorForm() {
         detected = isAnimalPrediction(predictions);
       } catch (err) {
         console.error("classifier error (fail open):", err);
-        detected = true; // fail open — don't block if TF.js errors or times out
+        detected = true;
       }
 
       removeToast(uploadToastId);
     }
 
-    // Step 3: reject non-animals before the preview is ever shown
     if (!detected) {
       URL.revokeObjectURL(tempUrl);
       if (inputRef.current) inputRef.current.value = "";
@@ -426,11 +431,10 @@ export default function ImageGeneratorForm() {
       return;
     }
 
-    // Step 4: accept — reuse the temp URL as the preview (no second createObjectURL needed)
     resizedBlobRef.current = resized;
-    uploadIdRef.current = crypto.randomUUID(); // stable ID for this upload's generate flow
+    uploadIdRef.current = generateId();
     resizedMimeRef.current = resized.type || "image/jpeg";
-    originalFileNameRef.current = f.name.replace(/\.[^.]+$/, ""); // strip extension; we'll add correct one at submit
+    originalFileNameRef.current = f.name.replace(/\.[^.]+$/, "");
     dispatch(setPredictions(predictions.length > 0 ? predictions : null));
     dispatch(setIsAnimal(predictions.length > 0 ? true : null));
     dispatch(setPreview({ url: tempUrl, name: f.name }));
@@ -438,7 +442,6 @@ export default function ImageGeneratorForm() {
     processingFileRef.current = false;
   }
 
-  // Maps raw server error codes/messages to friendly user-facing copy.
   function friendlyError(errJson: any, status: number): string {
     const raw: string = errJson?.detail ?? errJson?.error ?? "";
     if (raw === "rate_limited" || raw.includes("rate_limit"))
@@ -457,7 +460,6 @@ export default function ImageGeneratorForm() {
     return "Generation failed. Please try again.";
   }
 
-  // core submit function: sends image+prompt to server (or no_image on retry)
   async function submit(forceProceed = false, noImage = false, captionOverride?: string, beansOverride?: string[], topicOverride?: string) {
     if (submittingRef.current) return;
     if (!preview && !noImage) {
@@ -490,7 +492,6 @@ export default function ImageGeneratorForm() {
     setIdenticalDetected(false);
     dispatch(setResult({ url: null, latency: null, cost: null }));
 
-    // Use the blob already resized at upload time — no second resize needed.
     let uploadBlob: Blob | null = null;
     const originalFileName = originalFileNameRef.current;
     if (!noImage) {
@@ -502,7 +503,6 @@ export default function ImageGeneratorForm() {
       uploadBlob = resizedBlobRef.current;
     }
 
-    // build form
     const fd = new FormData();
     if (!noImage && uploadBlob) {
       const uploadMime = resizedMimeRef.current || "image/jpeg";
@@ -514,37 +514,27 @@ export default function ImageGeneratorForm() {
     fd.append("caption", captionToUse || "");
     const beansToUse = beansOverride ?? selectedBeans;
     if (beansToUse.length > 0) fd.append("beans", beansToUse.join(", "));
-    // POC: locked to medium ($0.07/image) — restore dynamic value for V1
     fd.append("quality", "medium");
     fd.append("size", size);
-    // include classifier top label to help text-only fallback
     if (topClassifierLabel) fd.append("classifier_label", topClassifierLabel);
     if (noImage) fd.append("no_image", "1");
 
-    // start timer only when we actually send
     startTimer();
     const uploadStart = Date.now();
     try {
-      dispatch(
-        setStatus(
-          noImage ? "Uploading prompt..." : "Uploading image+prompt...",
-        ),
-      );
+      dispatch(setStatus(noImage ? "Uploading prompt..." : "Uploading image+prompt..."));
       const res = await fetch("/api/generate-image", {
         method: "POST",
         body: fd,
       });
-      // As soon as server responds, stop the interval and set final elapsed value
       const receivedAt = Date.now();
-      const totalElapsedMs = receivedAt - uploadStart; // includes upload + provider wait
+      const totalElapsedMs = receivedAt - uploadStart;
       finalizeTimerAndSet(totalElapsedMs);
 
       if (!res.ok) {
         removeToast(genToastId);
         const errJson = await res.json().catch(() => null);
         addToast(friendlyError(errJson, res.status), "error");
-        // Re-sync credit counter if server reports insufficient credits
-        // (handles stale client state from multiple tabs or manual manipulation)
         if (res.status === 402) {
           fetch("/api/credits").then((r) => r.json()).then((data) => {
             if (typeof data.credits === "number") setCredits(data.credits);
@@ -569,7 +559,6 @@ export default function ImageGeneratorForm() {
 
       const json = await res.json();
 
-      // If server informs identical output, display button to retry without image
       if (json.identical) {
         removeToast(genToastId);
         setIdenticalDetected(true);
@@ -578,39 +567,19 @@ export default function ImageGeneratorForm() {
         setServerSizeNote(json.size_note ?? null);
         addToast("Output matched input — try generating from prompt only.", "info");
         dispatch(setLoading(false));
-        // ensure resultUrl cleared
-        dispatch(
-          setResult({
-            url: null,
-            latency: json.latency_ms ?? null,
-            cost: json.cost_usd ?? null,
-          }),
-        );
+        dispatch(setResult({ url: null, latency: json.latency_ms ?? null, cost: json.cost_usd ?? null }));
         return;
       }
 
-      // Normal successful result
       if (json.model_used) setServerModel(String(json.model_used));
       if (json.size_used) setServerSizeUsed(String(json.size_used));
       if (json.size_note) setServerSizeNote(String(json.size_note));
       if (json.prompt_used) setServerPromptUsed(String(json.prompt_used));
       if (json.image_dimensions) setServerImageDimensions(String(json.image_dimensions));
       if (json.latency_ms)
-        dispatch(
-          setResult({
-            url: json.url ?? null,
-            latency: json.latency_ms,
-            cost: json.cost_usd ?? null,
-          }),
-        );
+        dispatch(setResult({ url: json.url ?? null, latency: json.latency_ms, cost: json.cost_usd ?? null }));
       else
-        dispatch(
-          setResult({
-            url: json.url ?? null,
-            latency: null,
-            cost: json.cost_usd ?? null,
-          }),
-        );
+        dispatch(setResult({ url: json.url ?? null, latency: null, cost: json.cost_usd ?? null }));
 
       removeToast(genToastId);
       trackEvent("generate_success", {
@@ -621,11 +590,14 @@ export default function ImageGeneratorForm() {
       });
       if (json.url) persistResult(json.url, json.cost_usd ?? null);
       incrementGenCount();
-      // Decrement local credit counter (server already deducted atomically)
       setCredits((prev) => {
         if (prev === null) return null;
         return Math.max(0, prev - 1);
       });
+      // Reset result-view state for the new result
+      setShowOriginal(false);
+      setShowPrompt(false);
+      setCopied(false);
       const providerSec = json.latency_ms
         ? (json.latency_ms / 1000).toFixed(2) + "s"
         : "—";
@@ -653,11 +625,10 @@ export default function ImageGeneratorForm() {
     }
   }
 
+  // Full reset — clears image, result, and all transient state.
   function clearSelection() {
     if (preview) {
-      try {
-        URL.revokeObjectURL(preview);
-      } catch {}
+      try { URL.revokeObjectURL(preview); } catch {}
     }
     if (inputRef.current) inputRef.current.value = "";
     resizedBlobRef.current = null;
@@ -674,9 +645,13 @@ export default function ImageGeneratorForm() {
     setIdenticalDetected(false);
     setEmailCtaState("hidden");
     setEmailInput("");
+    setShowOriginal(false);
+    setShowPrompt(false);
+    setCopied(false);
   }
 
-  // Keeps the current photo, clears the result so controls reappear.
+  // Keeps the current photo, clears the result so the controls reappear.
+  // Used only by the "identical detected" fallback flow.
   function generateAnother() {
     dispatch(setResult({ url: null, latency: null, cost: null }));
     clearPersistedResult();
@@ -688,6 +663,9 @@ export default function ImageGeneratorForm() {
     setIdenticalDetected(false);
     setEmailCtaState("hidden");
     setEmailInput("");
+    setShowOriginal(false);
+    setShowPrompt(false);
+    setCopied(false);
   }
 
   async function handleEmailCapture() {
@@ -705,31 +683,44 @@ export default function ImageGeneratorForm() {
     setEmailCtaState("done");
   }
 
-  // Preselects an A-level theme from the post-generation row and returns to the form.
-  // Does NOT auto-generate — user must press Generate manually.
-  function handlePostGenThemeSelect(theme: { id: string; label: string }) {
-    generateAnother();
-    setSelectedBeans([]);
-    dispatch(setTopic(theme.id));
-    dispatch(setCaption(""));
+  function handleCopyLink() {
+    if (!resultUrl || resultUrl.startsWith("data:")) return;
+    navigator.clipboard.writeText(resultUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
   }
 
-  // What to show in the image area:
-  // result (if ready) → preview (if uploaded) → empty tap-to-upload
-  const displayUrl = resultUrl || preview;
+  // What to show in the image area: original toggle → result → preview
+  const displayUrl = resultUrl && showOriginal ? preview : (resultUrl || preview);
+
+  const resultHeadline = THEME_RESULT_HEADLINES[topic] ?? "Your Image is Ready";
+  const resultSubline = elapsedMs
+    ? `Generated in ${(elapsedMs / 1000).toFixed(1)}s · Download, share, or try another style`
+    : "Download, share, or try another style";
 
   return (
     <>
       <Toaster toasts={toasts} onDismiss={removeToast} />
 
       <div className="min-h-screen bg-slate-100 flex flex-col">
-        {/* Header */}
+
+        {/* Header — switches between form title and result headline */}
         <header className="bg-slate-100 px-4 pt-6 pb-4 text-center">
-          <PageHeader headline="Create Your Image" description="Upload a photo, choose a theme, and generate your image." />
-          {credits !== null && (
-            <span className="inline-flex items-center mt-2 bg-white rounded-full px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm whitespace-nowrap">
-              {credits} credit{credits === 1 ? "" : "s"} left
-            </span>
+          {resultUrl && !loading ? (
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900">{resultHeadline}</h1>
+              <p className="text-sm text-slate-500 mt-1">{resultSubline}</p>
+            </div>
+          ) : (
+            <>
+              <PageHeader headline="Create Your Image" description="Upload a photo, choose a theme, and generate your image." />
+              {credits !== null && (
+                <span className="inline-flex items-center mt-2 bg-white rounded-full px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm whitespace-nowrap">
+                  {credits} credit{credits === 1 ? "" : "s"} left
+                </span>
+              )}
+            </>
           )}
         </header>
 
@@ -775,7 +766,7 @@ export default function ImageGeneratorForm() {
               />
             )}
 
-            {/* Loading overlay — greys out the image and shows spinner */}
+            {/* Loading overlay */}
             {loading && preview && (
               <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-4">
                 <div className="w-14 h-14 rounded-full border-4 border-white/20 border-t-white animate-spin" />
@@ -783,7 +774,18 @@ export default function ImageGeneratorForm() {
               </div>
             )}
 
-            {/* Change photo button when preview is shown but no result yet */}
+            {/* Before / After toggle — visible when result is displayed over an original */}
+            {resultUrl && preview && !loading && (
+              <button
+                type="button"
+                onClick={() => setShowOriginal((v) => !v)}
+                className="absolute top-3 right-3 bg-black/50 backdrop-blur-sm text-white text-xs font-medium px-3 py-2 rounded-full"
+              >
+                {showOriginal ? "Generated" : "Original"}
+              </button>
+            )}
+
+            {/* Change photo button — shown in form mode only */}
             {preview && !resultUrl && !loading && (
               <label className="absolute bottom-3 right-3 cursor-pointer">
                 <span className="bg-black/50 backdrop-blur-sm text-white text-xs font-medium px-4 py-2.5 rounded-full">
@@ -800,7 +802,7 @@ export default function ImageGeneratorForm() {
             )}
           </div>
 
-          {/* Classifier badge */}
+          {/* Classifier badge — shown in form mode only */}
           {!resultUrl && predictions && predictions.length > 0 && (
             <div className={`text-center text-xs font-medium px-3 py-1.5 rounded-full self-center ${isAnimal ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
               {predictions[0].className.split(",")[0]} · {(predictions[0].probability * 100).toFixed(0)}% confidence
@@ -809,92 +811,100 @@ export default function ImageGeneratorForm() {
 
           {resultUrl && !loading ? (
             /* ── Result view ── */
-            <div className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-3">
-              <div>
-                <p className="text-base font-bold text-slate-900">Your Image Is Ready</p>
-                <p className="text-sm text-slate-500">Download it or generate another style.</p>
+            <div className="flex flex-col gap-3">
+
+              {/* Primary + Secondary CTAs */}
+              <div className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-3">
+
+                {/* Primary: Download HD */}
+                <a
+                  href={resultUrl}
+                  download={buildDownloadFilename(predictions, resultMimeFromUrl(resultUrl ?? ""))}
+                  onClick={() => trackEvent("download_clicked", { upload_id: uploadIdRef.current })}
+                  className="w-full text-center py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold hover:opacity-80 active:bg-indigo-700 transition-opacity"
+                >
+                  Download HD
+                </a>
+
+                {/* Secondary: Try Another Style — full clean reset */}
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="w-full py-4 rounded-2xl border border-slate-200 text-slate-800 text-base font-semibold hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Try Another Style
+                </button>
+
+                {/* Credit upsell — only when 0 or 1 credits remain */}
+                {credits !== null && credits <= 1 && (
+                  <div className="flex items-center justify-between rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+                    <p className="text-sm font-medium text-amber-800">
+                      {credits === 0
+                        ? "No credits left — keep creating"
+                        : "Only 1 credit left — keep creating"}
+                    </p>
+                    <a
+                      href="/pricing"
+                      className="text-sm font-semibold text-indigo-600 whitespace-nowrap ml-3"
+                    >
+                      Get 10 Credits
+                    </a>
+                  </div>
+                )}
               </div>
 
-              {credits === 0 ? (
-                <div className="text-center py-2 flex flex-col gap-1.5">
-                  <p className="text-sm font-medium text-slate-700">You've used all your credits.</p>
-                  <a href="/pricing" className="text-sm text-indigo-600 underline underline-offset-2">
-                    Buy more credits →
-                  </a>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={generateAnother}
-                  className="w-full py-4 rounded-2xl bg-indigo-600 text-white text-base font-semibold hover:opacity-80 active:bg-indigo-700 cursor-pointer transition-opacity"
-                >
-                  Generate Another
-                </button>
-              )}
-
-              <a
-                href={resultUrl}
-                download={buildDownloadFilename(predictions, resultMimeFromUrl(resultUrl ?? ""))}
-                onClick={() => trackEvent("download_clicked", { upload_id: uploadIdRef.current })}
-                className="w-full text-center py-4 rounded-2xl border border-slate-200 text-slate-800 text-base font-semibold"
-              >
-                Download
-              </a>
-
-              {/* Email CTA */}
-              {emailCtaState === "hidden" && (
-                <button
-                  type="button"
-                  onClick={() => setEmailCtaState("shown")}
-                  className="w-full text-center text-xs text-indigo-500 underline underline-offset-2 py-1"
-                >
-                  Get tips and updates
-                </button>
-              )}
-              {(emailCtaState === "shown" || emailCtaState === "submitting") && (
-                <form
-                  onSubmit={(e) => { e.preventDefault(); handleEmailCapture(); }}
-                  className="flex gap-2"
-                >
-                  <input
-                    type="email"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="your@email.com"
-                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    disabled={emailCtaState === "submitting"}
-                    autoFocus
-                  />
+              {/* Share section */}
+              <div className="bg-white rounded-2xl shadow-sm p-4">
+                <p className="text-sm font-semibold text-slate-900 mb-0.5">Share Your Image</p>
+                <p className="text-xs text-slate-400 mb-3">Download or share your generated image</p>
+                {resultUrl && !resultUrl.startsWith("data:") ? (
                   <button
-                    type="submit"
-                    disabled={emailCtaState === "submitting" || !emailInput.includes("@")}
-                    className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    type="button"
+                    onClick={handleCopyLink}
+                    className="w-full py-3 rounded-xl border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
                   >
-                    {emailCtaState === "submitting" ? "…" : "Notify me"}
+                    {copied ? "Link Copied" : "Copy Link"}
                   </button>
-                </form>
-              )}
-              {emailCtaState === "done" && (
-                <p className="text-xs text-center text-green-600 font-medium">Thanks! We'll be in touch.</p>
-              )}
+                ) : (
+                  <p className="text-xs text-slate-400">Download your image to share it with friends.</p>
+                )}
+              </div>
 
-              {/* Style remixes */}
-              <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Try another style</p>
-                <div className="flex gap-2 flex-wrap">
-                  {POST_GEN_THEMES.map((t) => (
+              {/* Explore Styles */}
+              <div className="bg-white rounded-2xl shadow-sm p-4">
+                <p className="text-sm font-semibold text-slate-900 mb-3">Explore Styles</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {EXPLORE_STYLES.map((style) => (
                     <button
-                      key={t.id}
+                      key={style.key}
                       type="button"
-                      onClick={() => handlePostGenThemeSelect(t)}
-                      disabled={credits === 0}
-                      className="px-4 py-2 rounded-full text-sm font-medium bg-slate-100 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                      onClick={clearSelection}
+                      className="py-3 rounded-xl bg-slate-100 text-slate-700 text-sm font-medium hover:bg-slate-200 transition-colors cursor-pointer"
                     >
-                      {t.label}
+                      {style.label}
                     </button>
                   ))}
                 </div>
               </div>
+
+              {/* Prompt Details — collapsed by default */}
+              {serverPromptUsed && (
+                <div className="bg-white rounded-2xl shadow-sm p-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowPrompt((v) => !v)}
+                    className="flex items-center justify-between w-full cursor-pointer"
+                  >
+                    <p className="text-sm font-semibold text-slate-900">Prompt Details</p>
+                    <span className="text-xs text-indigo-600 font-medium">
+                      {showPrompt ? "Hide" : "View Prompt"}
+                    </span>
+                  </button>
+                  {showPrompt && (
+                    <p className="text-sm text-slate-600 leading-relaxed mt-3">{serverPromptUsed}</p>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
           /* ── Controls ── */
@@ -921,29 +931,6 @@ export default function ImageGeneratorForm() {
                 ))}
               </div>
             </div>
-
-            {/* POC: hidden for now — restore for V1 quality tier feature
-            <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">Quality</label>
-              <div className="flex gap-2">
-                {(["low", "medium", "high"] as const).map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => dispatch(setQuality(q))}
-                    disabled={loading}
-                    className={`flex-1 py-2.5 rounded-full text-sm font-medium capitalize transition-colors ${
-                      quality === q
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-            */}
 
             {/* B-level beans */}
             {BEANS[topic] && (
@@ -1093,33 +1080,6 @@ export default function ImageGeneratorForm() {
               </div>
             </div>
           )}
-
-          {/* Prompt sent to AI */}
-          {resultUrl && serverPromptUsed && (
-            <div className="bg-white rounded-2xl shadow-sm p-4">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Prompt sent to AI</p>
-              <p className="text-sm text-slate-600 leading-relaxed">{serverPromptUsed}</p>
-            </div>
-          )}
-
-          {/* Hidden for launch — restore by uncommenting the block below
-          {resultUrl && !loading && (serverModel || elapsedMs != null) && (
-            <div className="bg-white rounded-2xl shadow-sm px-4 py-3 flex justify-around text-center">
-              {serverModel && (
-                <div>
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Model</p>
-                  <p className="text-sm font-medium text-slate-700">{serverModel}</p>
-                </div>
-              )}
-              {elapsedMs != null && (
-                <div>
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Speed</p>
-                  <p className="text-sm font-medium text-slate-700">{(elapsedMs / 1000).toFixed(1)}s</p>
-                </div>
-              )}
-            </div>
-          )}
-          end hidden stats strip */}
 
         </div>
       </div>
