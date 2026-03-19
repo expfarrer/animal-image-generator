@@ -92,6 +92,6 @@ async function fetchTxByIds(ids: string[]): Promise<CreditTransaction[]> {
   if (ids.length === 0) return [];
   const keys = ids.map(txKey);
   // @vercel/kv auto-deserializes JSON on read, so raw values are already objects.
-  const raws = await kv.mget<CreditTransaction>(...keys);
+  const raws = await kv.mget<(CreditTransaction | null)[]>(...keys);
   return (raws ?? []).filter(Boolean) as CreditTransaction[];
 }

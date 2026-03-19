@@ -146,7 +146,7 @@ async function fetchEventsByIds(ids: string[]): Promise<AnalyticsEvent[]> {
   if (ids.length === 0) return [];
   const keys = ids.map(eventKey);
   // @vercel/kv auto-deserializes JSON on read, so raw values are already objects.
-  const raws = await kv.mget<AnalyticsEvent>(...keys);
+  const raws = await kv.mget<(AnalyticsEvent | null)[]>(...keys);
   return (raws ?? []).filter(Boolean) as AnalyticsEvent[];
 }
 
