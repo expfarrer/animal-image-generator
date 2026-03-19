@@ -65,6 +65,9 @@ export interface AnalyticsSummary {
   // Generation timing
   avgGenerateDurationMs: number | null;
 
+  // Value signal — download is the best proxy for "user liked the result"
+  downloadRate: number | null; // downloads / uniqueUploads × 100
+
   // Session + email funnel
   generationSessionStartedCount: number;
   sessionToSuccessRate: number | null;
@@ -141,6 +144,7 @@ export async function getAnalyticsSummary(sinceMs?: number, rangeDays?: number):
     avgOriginalSizeBytes: null, avgOptimizedSizeBytes: null,
     avgSizeSavedBytes: null, avgReductionPercent: null,
     avgGenerateDurationMs: null,
+    downloadRate: null,
     generationSessionStartedCount: 0, sessionToSuccessRate: null,
     emailsCaptured: 0, uniqueGuestCount: 0,
     avgCostPerUpload: null, avgCostPerUser: null,
@@ -222,6 +226,11 @@ export async function getAnalyticsSummary(sinceMs?: number, rangeDays?: number):
       ? Math.round((totalEstimatedCostUsd / generateSuccesses) * 1000) / 1000
       : 0;
 
+    // Download rate — best proxy for "user got value"
+    const downloadRate = uniqueUploads > 0
+      ? Math.round((downloads / uniqueUploads) * 100)
+      : null;
+
     // Session + email funnel
     const generationSessionStartedCount = ofType("generation_session_started").length;
     const sessionToSuccessRate = generationSessionStartedCount > 0
@@ -274,6 +283,7 @@ export async function getAnalyticsSummary(sinceMs?: number, rangeDays?: number):
       avgSizeSavedBytes:     numericMean(optimizedEvents, "size_saved_bytes"),
       avgReductionPercent:   numericMean(optimizedEvents, "reduction_percent"),
       avgGenerateDurationMs: numericMean(successEvents,   "duration_ms"),
+      downloadRate,
       generationSessionStartedCount,
       sessionToSuccessRate,
       emailsCaptured,

@@ -71,7 +71,7 @@ const STRING_FIELDS: Record<EventName, string[]> = {
   generate_clicked:           ["upload_id"],
   generate_success:           ["upload_id", "model"],
   generate_failed:            ["upload_id", "model", "failure_stage", "failure_reason"],
-  download_clicked:           [],
+  download_clicked:           ["upload_id"],
   generation_session_started: ["upload_id"],
   email_captured:             [],
 };

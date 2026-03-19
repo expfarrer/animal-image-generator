@@ -835,7 +835,7 @@ export default function ImageGeneratorForm() {
               <a
                 href={resultUrl}
                 download={buildDownloadFilename(predictions, resultMimeFromUrl(resultUrl ?? ""))}
-                onClick={() => trackEvent("download_clicked")}
+                onClick={() => trackEvent("download_clicked", { upload_id: uploadIdRef.current })}
                 className="w-full text-center py-4 rounded-2xl border border-slate-200 text-slate-800 text-base font-semibold"
               >
                 Download
