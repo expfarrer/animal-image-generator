@@ -17,7 +17,9 @@ export type EventName =
   | "generate_clicked"
   | "generate_success"
   | "generate_failed"
-  | "download_clicked";
+  | "download_clicked"
+  | "generation_session_started"
+  | "email_captured";
 
 export function trackEvent(
   eventName: EventName,

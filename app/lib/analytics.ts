@@ -18,6 +18,8 @@ export const EVENT_NAMES = [
   "generate_success",
   "generate_failed",
   "download_clicked",
+  "generation_session_started",
+  "email_captured",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];
@@ -62,6 +64,20 @@ export interface AnalyticsSummary {
 
   // Generation timing
   avgGenerateDurationMs: number | null;
+
+  // Session + email funnel
+  generationSessionStartedCount: number;
+  sessionToSuccessRate: number | null;
+  emailsCaptured: number;
+  uniqueGuestCount: number;
+
+  // Per-upload / per-user cost
+  avgCostPerUpload: number | null;
+  avgCostPerUser: number | null;
+
+  // Projected cost
+  dailyEstimatedCost: number | null;
+  projectedMonthlyCost: number | null;
 
   // Recent events for the dashboard table
   recentEvents: AnalyticsEvent[];
@@ -115,7 +131,7 @@ export async function getRecentAnalyticsEvents(limit = 50): Promise<AnalyticsEve
  * excluded from grouped funnel / cost metrics. All derived rates default to 0
  * so the dashboard never renders undefined/null during the transition period.
  */
-export async function getAnalyticsSummary(sinceMs?: number): Promise<AnalyticsSummary> {
+export async function getAnalyticsSummary(sinceMs?: number, rangeDays?: number): Promise<AnalyticsSummary> {
   const empty: AnalyticsSummary = {
     uploads: 0, generateClicks: 0, generateSuccesses: 0, generateFailed: 0, downloads: 0,
     uniqueUploads: 0, uploadsWithClick: 0, uploadsWithSuccess: 0,
@@ -125,6 +141,10 @@ export async function getAnalyticsSummary(sinceMs?: number): Promise<AnalyticsSu
     avgOriginalSizeBytes: null, avgOptimizedSizeBytes: null,
     avgSizeSavedBytes: null, avgReductionPercent: null,
     avgGenerateDurationMs: null,
+    generationSessionStartedCount: 0, sessionToSuccessRate: null,
+    emailsCaptured: 0, uniqueGuestCount: 0,
+    avgCostPerUpload: null, avgCostPerUser: null,
+    dailyEstimatedCost: null, projectedMonthlyCost: null,
     recentEvents: [],
   };
 
@@ -202,6 +222,38 @@ export async function getAnalyticsSummary(sinceMs?: number): Promise<AnalyticsSu
       ? Math.round((totalEstimatedCostUsd / generateSuccesses) * 1000) / 1000
       : 0;
 
+    // Session + email funnel
+    const generationSessionStartedCount = ofType("generation_session_started").length;
+    const sessionToSuccessRate = generationSessionStartedCount > 0
+      ? Math.round((generateSuccesses / generationSessionStartedCount) * 100)
+      : null;
+    const emailsCaptured = ofType("email_captured").length;
+    const uniqueGuestCount = new Set(
+      events.map((e) => e.guestId).filter((g): g is string => g !== null),
+    ).size;
+
+    // Per-upload / per-user cost
+    const avgCostPerUpload = uniqueUploads > 0
+      ? Math.round((totalEstimatedCostUsd / uniqueUploads) * 1000) / 1000
+      : null;
+    const avgCostPerUser = uniqueGuestCount > 0
+      ? Math.round((totalEstimatedCostUsd / uniqueGuestCount) * 1000) / 1000
+      : null;
+
+    // Daily / projected cost
+    // events are newest-first; fall back to rangeDays when provided, else compute from span
+    const daySpan: number | null = rangeDays !== undefined
+      ? rangeDays
+      : events.length > 1
+        ? (events[0].createdAt - events[events.length - 1].createdAt) / (1000 * 60 * 60 * 24)
+        : null;
+    const dailyEstimatedCost = daySpan && daySpan > 0
+      ? Math.round((totalEstimatedCostUsd / daySpan) * 1000) / 1000
+      : null;
+    const projectedMonthlyCost = dailyEstimatedCost !== null
+      ? Math.round(dailyEstimatedCost * 30 * 100) / 100
+      : null;
+
     return {
       uploads,
       generateClicks,
@@ -222,6 +274,14 @@ export async function getAnalyticsSummary(sinceMs?: number): Promise<AnalyticsSu
       avgSizeSavedBytes:     numericMean(optimizedEvents, "size_saved_bytes"),
       avgReductionPercent:   numericMean(optimizedEvents, "reduction_percent"),
       avgGenerateDurationMs: numericMean(successEvents,   "duration_ms"),
+      generationSessionStartedCount,
+      sessionToSuccessRate,
+      emailsCaptured,
+      uniqueGuestCount,
+      avgCostPerUpload,
+      avgCostPerUser,
+      dailyEstimatedCost,
+      projectedMonthlyCost,
       recentEvents: events.slice(0, 50),
     };
   } catch (err) {

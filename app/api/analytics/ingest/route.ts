@@ -56,28 +56,34 @@ function ok() {
 
 // Allowlist of fields per event. Only these pass through — all else is dropped.
 const NUMERIC_FIELDS: Record<EventName, string[]> = {
-  upload_completed:  [],
-  image_optimized:   ["original_size_bytes", "optimized_size_bytes", "size_saved_bytes", "reduction_percent"],
-  generate_clicked:  [],
-  generate_success:  ["duration_ms", "estimated_cost_usd"],
-  generate_failed:   ["duration_ms", "estimated_cost_usd"],
-  download_clicked:  [],
+  upload_completed:           [],
+  image_optimized:            ["original_size_bytes", "optimized_size_bytes", "size_saved_bytes", "reduction_percent"],
+  generate_clicked:           [],
+  generate_success:           ["duration_ms", "estimated_cost_usd"],
+  generate_failed:            ["duration_ms", "estimated_cost_usd"],
+  download_clicked:           [],
+  generation_session_started: [],
+  email_captured:             [],
 };
 const STRING_FIELDS: Record<EventName, string[]> = {
-  upload_completed:  ["upload_id"],
-  image_optimized:   ["output_format"],
-  generate_clicked:  ["upload_id"],
-  generate_success:  ["upload_id", "model"],
-  generate_failed:   ["upload_id", "model", "failure_stage", "failure_reason"],
-  download_clicked:  [],
+  upload_completed:           ["upload_id"],
+  image_optimized:            ["output_format"],
+  generate_clicked:           ["upload_id"],
+  generate_success:           ["upload_id", "model"],
+  generate_failed:            ["upload_id", "model", "failure_stage", "failure_reason"],
+  download_clicked:           [],
+  generation_session_started: ["upload_id"],
+  email_captured:             [],
 };
 const BOOL_FIELDS: Record<EventName, string[]> = {
-  upload_completed:  [],
-  image_optimized:   ["had_transparency"],
-  generate_clicked:  [],
-  generate_success:  [],
-  generate_failed:   [],
-  download_clicked:  [],
+  upload_completed:           [],
+  image_optimized:            ["had_transparency"],
+  generate_clicked:           [],
+  generate_success:           [],
+  generate_failed:            [],
+  download_clicked:           [],
+  generation_session_started: [],
+  email_captured:             [],
 };
 
 function sanitizeData(
