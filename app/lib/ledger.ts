@@ -91,13 +91,7 @@ export async function getLedgerTotal(): Promise<number> {
 async function fetchTxByIds(ids: string[]): Promise<CreditTransaction[]> {
   if (ids.length === 0) return [];
   const keys = ids.map(txKey);
-  // mget<TData extends unknown[]> requires an array type parameter, not a scalar
-  const raws = await kv.mget<(string | null)[]>(...keys);
-  return (raws ?? [])
-    .map((raw) => {
-      if (!raw) return null;
-      try { return JSON.parse(raw) as CreditTransaction; }
-      catch { return null; }
-    })
-    .filter(Boolean) as CreditTransaction[];
+  // @vercel/kv auto-deserializes JSON on read, so raw values are already objects.
+  const raws = await kv.mget<CreditTransaction>(...keys);
+  return (raws ?? []).filter(Boolean) as CreditTransaction[];
 }
