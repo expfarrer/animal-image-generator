@@ -1,6 +1,12 @@
 // app/admin/credits/AnalyticsDashboard.tsx
 // Server component — rendered inside the admin/credits page (already protected by middleware).
 // Displays summary cards and a recent events table. No client state needed.
+//
+// Layout (POC operator view):
+//   Row 1 — Funnel / product quality
+//   Row 2 — Cost / economics
+//   Row 3 — Value signal
+//   Recent events table for QA / debugging
 
 import type { AnalyticsSummary, AnalyticsEvent, EventName } from "../../lib/analytics";
 
@@ -19,6 +25,11 @@ function fmtBytes(n: number | null): string {
 function fmtCost(n: number | null): string {
   if (n === null) return "—";
   return `$${n.toFixed(2)}`;
+}
+
+function fmtCostPrecise(n: number | null): string {
+  if (n === null) return "—";
+  return `$${n.toFixed(3)}`;
 }
 
 function fmtDate(ts: number) {
@@ -87,11 +98,9 @@ const EVENT_BADGE: Record<EventName, string> = {
 export default function AnalyticsDashboard({
   summary,
   range,
-  contactCount,
 }: {
   summary: AnalyticsSummary;
   range: string;
-  contactCount: number;
 }) {
   const rangeLabel = range === "30d" ? "30 days" : range === "all" ? "all time" : "7 days";
 
@@ -120,17 +129,12 @@ export default function AnalyticsDashboard({
         </div>
       </div>
 
-      {/* Summary cards — row 1: funnel counts */}
+      {/* Row 1 — Funnel / product quality */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
         <Card
           label="Unique Uploads"
           value={fmt(summary.uniqueUploads)}
           sub="distinct images"
-        />
-        <Card
-          label="Generate Attempts"
-          value={fmt(summary.generateClicks)}
-          sub={summary.generateFailureRate !== null ? `${summary.generateFailureRate}% failure rate` : undefined}
         />
         <Card
           label="Successful Gens"
@@ -140,20 +144,11 @@ export default function AnalyticsDashboard({
             : undefined}
         />
         <Card
-          label="Failed Gens"
-          value={fmt(summary.generateFailed)}
-          sub={summary.generateFailed > 0 ? "see events table" : undefined}
-        />
-      </div>
-
-      {/* Summary cards — row 2: rates + cost */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <Card
           label="Upload → Success"
           value={summary.correctedUploadToSuccessRate !== null
             ? `${summary.correctedUploadToSuccessRate}%`
             : "—"}
-          sub="unique upload basis"
+          sub={summary.generateFailureRate ? `${summary.generateFailureRate}% failure rate` : "unique upload basis"}
         />
         <Card
           label="Avg Retries / Upload"
@@ -162,6 +157,10 @@ export default function AnalyticsDashboard({
             : "—"}
           sub="extra clicks per image"
         />
+      </div>
+
+      {/* Row 2 — Cost / economics */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
         <Card
           label="Total Est. Cost"
           value={fmtCost(summary.totalEstimatedCostUsd)}
@@ -169,32 +168,32 @@ export default function AnalyticsDashboard({
         />
         <Card
           label="Avg Cost / Success"
-          value={fmtCost(summary.avgCostPerSuccess)}
+          value={fmtCostPrecise(summary.avgCostPerSuccess)}
           sub="estimated, not billed"
         />
-      </div>
-
-      {/* Summary cards — row 3: growth + cost forecasting */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <Card
-          label="Total Emails Captured"
-          value={fmt(contactCount)}
-          sub="lifetime · all time"
-        />
-        <Card
-          label="Unique Guests"
-          value={fmt(summary.uniqueGuestCount)}
-          sub="distinct sessions in range"
-        />
-        <Card
-          label="Daily Est. Cost"
-          value={summary.dailyEstimatedCost !== null ? `$${summary.dailyEstimatedCost.toFixed(3)}` : "—"}
-          sub="based on range"
+          label="Avg Cost / Upload"
+          value={fmtCostPrecise(summary.avgCostPerUpload)}
+          sub="incl. retries"
         />
         <Card
           label="Proj. Monthly Cost"
           value={fmtCost(summary.projectedMonthlyCost)}
-          sub="daily × 30"
+          sub={`based on ${rangeLabel}`}
+        />
+      </div>
+
+      {/* Row 3 — Value signal */}
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        <Card
+          label="Download Rate"
+          value={summary.downloadRate !== null ? `${summary.downloadRate}%` : "—"}
+          sub="downloads per unique upload"
+        />
+        <Card
+          label="Unique Sessions"
+          value={fmt(summary.uniqueGuestCount)}
+          sub="distinct guest IDs in range"
         />
       </div>
 

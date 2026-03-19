@@ -15,7 +15,6 @@ import {
   getLedgerTotal,
 } from "../../lib/ledger";
 import { getAnalyticsSummary } from "../../lib/analytics";
-import { getContactCount } from "../../lib/contacts";
 import LedgerTable from "./LedgerTable";
 import AnalyticsDashboard from "./AnalyticsDashboard";
 
@@ -53,13 +52,12 @@ export default async function AdminCreditsPage({ searchParams }: Props) {
   const pageNum = Math.max(1, parseInt(page ?? "1", 10));
   const offset = (pageNum - 1) * PAGE_SIZE;
 
-  const [transactions, total, summary, contactCount] = await Promise.all([
+  const [transactions, total, summary] = await Promise.all([
     guest
       ? getTransactionsByGuest(decodeURIComponent(guest), PAGE_SIZE)
       : getRecentTransactions(PAGE_SIZE, offset),
     getLedgerTotal(),
     getAnalyticsSummary(sinceMs, rangeDays),
-    getContactCount(),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -80,7 +78,7 @@ export default async function AdminCreditsPage({ searchParams }: Props) {
         </div>
 
         {/* Analytics section */}
-        <AnalyticsDashboard summary={summary} range={range} contactCount={contactCount} />
+        <AnalyticsDashboard summary={summary} range={range} />
 
         {/* Ledger section */}
         <div className="mb-4">
