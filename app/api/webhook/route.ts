@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { stripe, priceIdToCredits } from "../../lib/stripe";
 import { incrementCredits } from "../../features/credits";
+import { upsertContact } from "../../lib/contacts";
 
 export const runtime = "nodejs";
 
@@ -62,6 +63,12 @@ export async function POST(request: Request) {
     }
 
     await incrementCredits(email, credits);
+    await upsertContact(
+      email.trim().toLowerCase(),
+      null,
+      "stripe",
+      typeof session.customer === "string" ? session.customer : null,
+    );
     console.log(`[webhook] +${credits} credits → ${email} (session ${session.id})`);
   }
 

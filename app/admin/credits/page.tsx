@@ -15,6 +15,7 @@ import {
   getLedgerTotal,
 } from "../../lib/ledger";
 import { getAnalyticsSummary } from "../../lib/analytics";
+import { getContactCount } from "../../lib/contacts";
 import LedgerTable from "./LedgerTable";
 import AnalyticsDashboard from "./AnalyticsDashboard";
 
@@ -25,6 +26,12 @@ const PAGE_SIZE = 50;
 const RANGE_MS: Record<string, number | undefined> = {
   "7d":  7  * 24 * 60 * 60 * 1000,
   "30d": 30 * 24 * 60 * 60 * 1000,
+  "all": undefined,
+};
+
+const RANGE_DAYS: Record<string, number | undefined> = {
+  "7d":  7,
+  "30d": 30,
   "all": undefined,
 };
 
@@ -41,16 +48,18 @@ export default async function AdminCreditsPage({ searchParams }: Props) {
   const range = (rangeParam && rangeParam in RANGE_MS) ? rangeParam : "7d";
   const rangeMs = RANGE_MS[range];
   const sinceMs = rangeMs !== undefined ? Date.now() - rangeMs : undefined;
+  const rangeDays = RANGE_DAYS[range];
 
   const pageNum = Math.max(1, parseInt(page ?? "1", 10));
   const offset = (pageNum - 1) * PAGE_SIZE;
 
-  const [transactions, total, summary] = await Promise.all([
+  const [transactions, total, summary, contactCount] = await Promise.all([
     guest
       ? getTransactionsByGuest(decodeURIComponent(guest), PAGE_SIZE)
       : getRecentTransactions(PAGE_SIZE, offset),
     getLedgerTotal(),
-    getAnalyticsSummary(sinceMs),
+    getAnalyticsSummary(sinceMs, rangeDays),
+    getContactCount(),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -71,7 +80,7 @@ export default async function AdminCreditsPage({ searchParams }: Props) {
         </div>
 
         {/* Analytics section */}
-        <AnalyticsDashboard summary={summary} range={range} />
+        <AnalyticsDashboard summary={summary} range={range} contactCount={contactCount} />
 
         {/* Ledger section */}
         <div className="mb-4">

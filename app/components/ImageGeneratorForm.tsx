@@ -229,6 +229,9 @@ export default function ImageGeneratorForm() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [emailCtaState, setEmailCtaState] = useState<"hidden" | "shown" | "submitting" | "done">("hidden");
+  const [emailInput, setEmailInput] = useState<string>("");
+
   const [serverModel, setServerModel] = useState<string | null>(null);
   const [serverSizeUsed, setServerSizeUsed] = useState<string | null>(null);
   const [serverSizeNote, setServerSizeNote] = useState<string | null>(null);
@@ -299,6 +302,8 @@ export default function ImageGeneratorForm() {
   // Stable ID linking upload_completed → generate_clicked → generate_success/failed.
   // Generated on each newly accepted image upload; cleared when selection is reset.
   const uploadIdRef = useRef<string | null>(null);
+  // Tracks whether generation_session_started has been fired for the current upload.
+  const sessionStartedRef = useRef<boolean>(false);
 
   const PREVIEW_MAX_DIM = 1024;
 
@@ -467,6 +472,10 @@ export default function ImageGeneratorForm() {
       return;
     }
     submittingRef.current = true;
+    if (!sessionStartedRef.current) {
+      trackEvent("generation_session_started", { upload_id: uploadIdRef.current });
+      sessionStartedRef.current = true;
+    }
     trackEvent("generate_clicked", { upload_id: uploadIdRef.current });
     dispatch(setLoading(true));
     const genToastId = addToast(
@@ -654,6 +663,7 @@ export default function ImageGeneratorForm() {
     resizedBlobRef.current = null;
     resizedMimeRef.current = "image/jpeg";
     uploadIdRef.current = null;
+    sessionStartedRef.current = false;
     clearPersistedResult();
     dispatch(reset());
     setServerModel(null);
@@ -662,6 +672,8 @@ export default function ImageGeneratorForm() {
     setServerPromptUsed(null);
     setServerImageDimensions(null);
     setIdenticalDetected(false);
+    setEmailCtaState("hidden");
+    setEmailInput("");
   }
 
   // Keeps the current photo, clears the result so controls reappear.
@@ -674,6 +686,23 @@ export default function ImageGeneratorForm() {
     setServerPromptUsed(null);
     setServerImageDimensions(null);
     setIdenticalDetected(false);
+    setEmailCtaState("hidden");
+    setEmailInput("");
+  }
+
+  async function handleEmailCapture() {
+    const trimmed = emailInput.trim().toLowerCase();
+    if (!trimmed.includes("@")) return;
+    setEmailCtaState("submitting");
+    try {
+      await fetch("/api/user/capture-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed }),
+      });
+    } catch {}
+    trackEvent("email_captured");
+    setEmailCtaState("done");
   }
 
   // Preselects an A-level theme from the post-generation row and returns to the form.
@@ -811,6 +840,43 @@ export default function ImageGeneratorForm() {
               >
                 Download
               </a>
+
+              {/* Email CTA */}
+              {emailCtaState === "hidden" && (
+                <button
+                  type="button"
+                  onClick={() => setEmailCtaState("shown")}
+                  className="w-full text-center text-xs text-indigo-500 underline underline-offset-2 py-1"
+                >
+                  Get tips and updates
+                </button>
+              )}
+              {(emailCtaState === "shown" || emailCtaState === "submitting") && (
+                <form
+                  onSubmit={(e) => { e.preventDefault(); handleEmailCapture(); }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="email"
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="your@email.com"
+                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    disabled={emailCtaState === "submitting"}
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    disabled={emailCtaState === "submitting" || !emailInput.includes("@")}
+                    className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {emailCtaState === "submitting" ? "…" : "Notify me"}
+                  </button>
+                </form>
+              )}
+              {emailCtaState === "done" && (
+                <p className="text-xs text-center text-green-600 font-medium">Thanks! We'll be in touch.</p>
+              )}
 
               {/* Style remixes */}
               <div>

@@ -74,20 +74,24 @@ function EventDataCell({ event }: { event: AnalyticsEvent }) {
 }
 
 const EVENT_BADGE: Record<EventName, string> = {
-  upload_completed:  "bg-blue-100 text-blue-700",
-  image_optimized:   "bg-violet-100 text-violet-700",
-  generate_clicked:  "bg-amber-100 text-amber-700",
-  generate_success:  "bg-green-100 text-green-700",
-  generate_failed:   "bg-red-100 text-red-700",
-  download_clicked:  "bg-slate-100 text-slate-600",
+  upload_completed:           "bg-blue-100 text-blue-700",
+  image_optimized:            "bg-violet-100 text-violet-700",
+  generate_clicked:           "bg-amber-100 text-amber-700",
+  generate_success:           "bg-green-100 text-green-700",
+  generate_failed:            "bg-red-100 text-red-700",
+  download_clicked:           "bg-slate-100 text-slate-600",
+  generation_session_started: "bg-cyan-100 text-cyan-700",
+  email_captured:             "bg-pink-100 text-pink-700",
 };
 
 export default function AnalyticsDashboard({
   summary,
   range,
+  contactCount,
 }: {
   summary: AnalyticsSummary;
   range: string;
+  contactCount: number;
 }) {
   const rangeLabel = range === "30d" ? "30 days" : range === "all" ? "all time" : "7 days";
 
@@ -167,6 +171,30 @@ export default function AnalyticsDashboard({
           label="Avg Cost / Success"
           value={fmtCost(summary.avgCostPerSuccess)}
           sub="estimated, not billed"
+        />
+      </div>
+
+      {/* Summary cards — row 3: growth + cost forecasting */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <Card
+          label="Total Emails Captured"
+          value={fmt(contactCount)}
+          sub="lifetime · all time"
+        />
+        <Card
+          label="Unique Guests"
+          value={fmt(summary.uniqueGuestCount)}
+          sub="distinct sessions in range"
+        />
+        <Card
+          label="Daily Est. Cost"
+          value={summary.dailyEstimatedCost !== null ? `$${summary.dailyEstimatedCost.toFixed(3)}` : "—"}
+          sub="based on range"
+        />
+        <Card
+          label="Proj. Monthly Cost"
+          value={fmtCost(summary.projectedMonthlyCost)}
+          sub="daily × 30"
         />
       </div>
 
