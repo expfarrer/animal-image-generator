@@ -296,6 +296,9 @@ export default function ImageGeneratorForm() {
   // Tracks the actual mime type of the resized blob (image/jpeg or image/png)
   const resizedMimeRef = useRef<string>("image/jpeg");
   const originalFileNameRef = useRef<string>("upload");
+  // Stable ID linking upload_completed → generate_clicked → generate_success/failed.
+  // Generated on each newly accepted image upload; cleared when selection is reset.
+  const uploadIdRef = useRef<string | null>(null);
 
   const PREVIEW_MAX_DIM = 1024;
 
@@ -420,12 +423,13 @@ export default function ImageGeneratorForm() {
 
     // Step 4: accept — reuse the temp URL as the preview (no second createObjectURL needed)
     resizedBlobRef.current = resized;
+    uploadIdRef.current = crypto.randomUUID(); // stable ID for this upload's generate flow
     resizedMimeRef.current = resized.type || "image/jpeg";
     originalFileNameRef.current = f.name.replace(/\.[^.]+$/, ""); // strip extension; we'll add correct one at submit
     dispatch(setPredictions(predictions.length > 0 ? predictions : null));
     dispatch(setIsAnimal(predictions.length > 0 ? true : null));
     dispatch(setPreview({ url: tempUrl, name: f.name }));
-    trackEvent("upload_completed");
+    trackEvent("upload_completed", { upload_id: uploadIdRef.current });
     processingFileRef.current = false;
   }
 
@@ -463,7 +467,7 @@ export default function ImageGeneratorForm() {
       return;
     }
     submittingRef.current = true;
-    trackEvent("generate_clicked");
+    trackEvent("generate_clicked", { upload_id: uploadIdRef.current });
     dispatch(setLoading(true));
     const genToastId = addToast(
       noImage ? "Generating from prompt…" : "Generating your image…",
@@ -537,6 +541,19 @@ export default function ImageGeneratorForm() {
             if (typeof data.credits === "number") setCredits(data.credits);
           }).catch(() => {});
         }
+        const failureStage = res.status === 429 ? "rate_limited"
+          : res.status === 402 ? "credits"
+          : res.status === 400 ? "validation"
+          : res.status >= 500 ? "provider"
+          : "unknown";
+        const rawReason = typeof errJson?.error === "string" ? errJson.error
+          : typeof errJson?.detail === "string" ? errJson.detail : "";
+        trackEvent("generate_failed", {
+          upload_id: uploadIdRef.current,
+          duration_ms: totalElapsedMs,
+          failure_stage: failureStage,
+          ...(rawReason ? { failure_reason: rawReason.slice(0, 50) } : {}),
+        });
         dispatch(setLoading(false));
         return;
       }
@@ -587,7 +604,12 @@ export default function ImageGeneratorForm() {
         );
 
       removeToast(genToastId);
-      trackEvent("generate_success", { duration_ms: totalElapsedMs });
+      trackEvent("generate_success", {
+        duration_ms: totalElapsedMs,
+        upload_id: uploadIdRef.current,
+        estimated_cost_usd: typeof json.cost_usd === "number" ? json.cost_usd : undefined,
+        model: typeof json.model_used === "string" ? json.model_used : undefined,
+      });
       if (json.url) persistResult(json.url, json.cost_usd ?? null);
       incrementGenCount();
       // Decrement local credit counter (server already deducted atomically)
@@ -610,6 +632,11 @@ export default function ImageGeneratorForm() {
       removeToast(genToastId);
       finalizeTimerAndSet(Date.now() - uploadStart);
       addToast("Generation failed. Please try again.", "error");
+      trackEvent("generate_failed", {
+        upload_id: uploadIdRef.current,
+        duration_ms: Date.now() - uploadStart,
+        failure_stage: "network",
+      });
     } finally {
       submittingRef.current = false;
       stopTimer();
@@ -626,6 +653,7 @@ export default function ImageGeneratorForm() {
     if (inputRef.current) inputRef.current.value = "";
     resizedBlobRef.current = null;
     resizedMimeRef.current = "image/jpeg";
+    uploadIdRef.current = null;
     clearPersistedResult();
     dispatch(reset());
     setServerModel(null);

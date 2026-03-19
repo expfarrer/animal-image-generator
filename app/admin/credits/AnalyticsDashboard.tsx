@@ -16,6 +16,11 @@ function fmtBytes(n: number | null): string {
   return `${n} B`;
 }
 
+function fmtCost(n: number | null): string {
+  if (n === null) return "—";
+  return `$${n.toFixed(2)}`;
+}
+
 function fmtDate(ts: number) {
   return new Date(ts).toLocaleString("en-US", {
     month: "short", day: "2-digit",
@@ -52,6 +57,16 @@ function EventDataCell({ event }: { event: AnalyticsEvent }) {
     return (
       <span className="text-xs text-slate-500 font-mono">
         {typeof d.duration_ms === "number" ? `${(d.duration_ms / 1000).toFixed(1)}s` : "—"}
+        {typeof d.estimated_cost_usd === "number" ? ` · ${fmtCost(d.estimated_cost_usd)}` : ""}
+      </span>
+    );
+  }
+  if (event.eventName === "generate_failed") {
+    return (
+      <span className="text-xs text-red-500 font-mono">
+        {typeof d.failure_stage === "string" ? d.failure_stage : "unknown"}
+        {typeof d.failure_reason === "string" && d.failure_reason ? ` · ${d.failure_reason}` : ""}
+        {typeof d.duration_ms === "number" ? ` (${(d.duration_ms / 1000).toFixed(1)}s)` : ""}
       </span>
     );
   }
@@ -63,6 +78,7 @@ const EVENT_BADGE: Record<EventName, string> = {
   image_optimized:   "bg-violet-100 text-violet-700",
   generate_clicked:  "bg-amber-100 text-amber-700",
   generate_success:  "bg-green-100 text-green-700",
+  generate_failed:   "bg-red-100 text-red-700",
   download_clicked:  "bg-slate-100 text-slate-600",
 };
 
@@ -100,39 +116,57 @@ export default function AnalyticsDashboard({
         </div>
       </div>
 
-      {/* Summary cards — two rows */}
+      {/* Summary cards — row 1: funnel counts */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-        <Card label="Uploads"              value={fmt(summary.uploads)} />
-        <Card label="Generate Clicks"      value={fmt(summary.generateClicks)} />
-        <Card label="Successful Gens"      value={fmt(summary.generateSuccesses)} />
-        <Card label="Downloads"            value={fmt(summary.downloads)} />
+        <Card
+          label="Unique Uploads"
+          value={fmt(summary.uniqueUploads)}
+          sub="distinct images"
+        />
+        <Card
+          label="Generate Attempts"
+          value={fmt(summary.generateClicks)}
+          sub={summary.generateFailureRate !== null ? `${summary.generateFailureRate}% failure rate` : undefined}
+        />
+        <Card
+          label="Successful Gens"
+          value={fmt(summary.generateSuccesses)}
+          sub={summary.avgGenerateDurationMs !== null
+            ? `avg ${(summary.avgGenerateDurationMs / 1000).toFixed(1)}s`
+            : undefined}
+        />
+        <Card
+          label="Failed Gens"
+          value={fmt(summary.generateFailed)}
+          sub={summary.generateFailed > 0 ? "see events table" : undefined}
+        />
       </div>
+
+      {/* Summary cards — row 2: rates + cost */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <Card
-          label="Upload → Generate"
-          value={summary.uploadToGenerateConversion !== null
-            ? `${summary.uploadToGenerateConversion}%`
+          label="Upload → Success"
+          value={summary.correctedUploadToSuccessRate !== null
+            ? `${summary.correctedUploadToSuccessRate}%`
             : "—"}
-          sub="conversion rate"
+          sub="unique upload basis"
         />
         <Card
-          label="Generate Success"
-          value={summary.generateSuccessRate !== null
-            ? `${summary.generateSuccessRate}%`
+          label="Avg Retries / Upload"
+          value={summary.avgRetriesPerUpload !== null
+            ? summary.avgRetriesPerUpload.toFixed(1)
             : "—"}
-          sub="of clicks"
+          sub="extra clicks per image"
         />
         <Card
-          label="Avg Compression"
-          value={fmt(summary.avgReductionPercent, "%")}
-          sub={`${fmtBytes(summary.avgOriginalSizeBytes)} → ${fmtBytes(summary.avgOptimizedSizeBytes)}`}
+          label="Total Est. Cost"
+          value={fmtCost(summary.totalEstimatedCostUsd)}
+          sub={`${fmt(summary.generateSuccesses)} billed gens`}
         />
         <Card
-          label="Avg Gen Time"
-          value={summary.avgGenerateDurationMs !== null
-            ? `${(summary.avgGenerateDurationMs / 1000).toFixed(1)}s`
-            : "—"}
-          sub="end-to-end"
+          label="Avg Cost / Success"
+          value={fmtCost(summary.avgCostPerSuccess)}
+          sub="estimated, not billed"
         />
       </div>
 
@@ -150,6 +184,7 @@ export default function AnalyticsDashboard({
                 <th className="px-4 py-3 whitespace-nowrap">Timestamp</th>
                 <th className="px-4 py-3 whitespace-nowrap">Event</th>
                 <th className="px-4 py-3 whitespace-nowrap">Guest ID</th>
+                <th className="px-4 py-3 whitespace-nowrap">Upload ID</th>
                 <th className="px-4 py-3 whitespace-nowrap">Data</th>
                 <th className="px-4 py-3 whitespace-nowrap">Path</th>
               </tr>
@@ -181,6 +216,15 @@ export default function AnalyticsDashboard({
                       >
                         {ev.guestId.slice(0, 8)}…
                       </a>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {typeof ev.data.upload_id === "string" ? (
+                      <span className="font-mono text-xs text-slate-400" title={ev.data.upload_id}>
+                        {ev.data.upload_id.slice(0, 8)}…
+                      </span>
                     ) : (
                       <span className="text-xs text-slate-300">—</span>
                     )}

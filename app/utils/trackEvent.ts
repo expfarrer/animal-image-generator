@@ -2,7 +2,7 @@
 // Client-side analytics helper — fire-and-forget, never throws.
 //
 // Usage:
-//   trackEvent("upload_completed");
+//   trackEvent("upload_completed", { upload_id: "..." });
 //   trackEvent("image_optimized", { original_size_bytes: 204800, ... });
 //
 // The server ingest route reads the guest ID from the session cookie server-side,
@@ -16,6 +16,7 @@ export type EventName =
   | "image_optimized"
   | "generate_clicked"
   | "generate_success"
+  | "generate_failed"
   | "download_clicked";
 
 export function trackEvent(
