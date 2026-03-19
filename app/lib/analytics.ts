@@ -39,14 +39,16 @@ export interface AnalyticsSummary {
   generateFailed: number;
   downloads: number;
 
-  // Corrected funnel — upload_id-based (one ID per distinct accepted image)
+  // Corrected funnel — upload_id-based (one ID per distinct accepted image).
+  // All derived rates default to 0 (not null) so the dashboard always renders a number,
+  // even during the legacy→upload_id transition when not all events have an upload_id yet.
   uniqueUploads: number;
   uploadsWithClick: number;
   uploadsWithSuccess: number;
-  correctedUploadToGenerateRate: number | null; // percent, null if no uploads
-  correctedUploadToSuccessRate: number | null;  // percent, null if no uploads
-  avgRetriesPerUpload: number | null;           // 1-decimal, null if no clicks
-  generateFailureRate: number | null;           // percent of clicks that resulted in failure
+  correctedUploadToGenerateRate: number | null;
+  correctedUploadToSuccessRate: number | null;
+  avgRetriesPerUpload: number | null;
+  generateFailureRate: number | null;
 
   // Cost (estimated, from generate_success events only — credits deducted on success)
   totalEstimatedCostUsd: number | null;
@@ -107,14 +109,19 @@ export async function getRecentAnalyticsEvents(limit = 50): Promise<AnalyticsEve
 
 /**
  * Compute summary statistics, optionally filtered to events after `sinceMs`.
+ *
+ * Resilience: upload_id-based metrics use only events that carry an upload_id
+ * (new events). Legacy events without upload_id are counted in raw totals but
+ * excluded from grouped funnel / cost metrics. All derived rates default to 0
+ * so the dashboard never renders undefined/null during the transition period.
  */
 export async function getAnalyticsSummary(sinceMs?: number): Promise<AnalyticsSummary> {
   const empty: AnalyticsSummary = {
     uploads: 0, generateClicks: 0, generateSuccesses: 0, generateFailed: 0, downloads: 0,
     uniqueUploads: 0, uploadsWithClick: 0, uploadsWithSuccess: 0,
-    correctedUploadToGenerateRate: null, correctedUploadToSuccessRate: null,
-    avgRetriesPerUpload: null, generateFailureRate: null,
-    totalEstimatedCostUsd: null, avgCostPerSuccess: null,
+    correctedUploadToGenerateRate: 0, correctedUploadToSuccessRate: 0,
+    avgRetriesPerUpload: 0, generateFailureRate: 0,
+    totalEstimatedCostUsd: 0, avgCostPerSuccess: 0,
     avgOriginalSizeBytes: null, avgOptimizedSizeBytes: null,
     avgSizeSavedBytes: null, avgReductionPercent: null,
     avgGenerateDurationMs: null,
@@ -131,7 +138,15 @@ export async function getAnalyticsSummary(sinceMs?: number): Promise<AnalyticsSu
       events = events.filter((e) => e.createdAt >= sinceMs);
     }
 
-    const ofType = (name: EventName) => events.filter((e) => e.eventName === name);
+    // Events that carry an upload_id — used exclusively for upload-based funnel metrics.
+    // Legacy events (pre-upload_id) are silently excluded from grouped metrics but still
+    // contribute to raw counts (generateClicks, generateSuccesses, generateFailed, etc.).
+    const validEvents = events.filter(
+      (e) => typeof e.data.upload_id === "string" && (e.data.upload_id as string).length > 0,
+    );
+
+    const ofType    = (name: EventName) => events.filter((e) => e.eventName === name);
+    const ofTypeValid = (name: EventName) => validEvents.filter((e) => e.eventName === name);
 
     const uploadCompletedEvents = ofType("upload_completed");
     const clickEvents           = ofType("generate_clicked");
@@ -139,33 +154,42 @@ export async function getAnalyticsSummary(sinceMs?: number): Promise<AnalyticsSu
     const failedEvents          = ofType("generate_failed");
     const optimizedEvents       = ofType("image_optimized");
 
+    // Raw counts — all events regardless of upload_id
     const uploads           = uploadCompletedEvents.length;
     const generateClicks    = clickEvents.length;
     const generateSuccesses = successEvents.length;
     const generateFailed    = failedEvents.length;
     const downloads         = ofType("download_clicked").length;
 
-    // upload_id-based corrected funnel
-    const uniqueUploadIds    = uniqueStringSet(uploadCompletedEvents, "upload_id");
-    const clickUploadIds     = uniqueStringSet(clickEvents, "upload_id");
-    const successUploadIds   = uniqueStringSet(successEvents, "upload_id");
+    // upload_id-based corrected funnel — valid events only
+    const uniqueUploadIds    = uniqueStringSet(ofTypeValid("upload_completed"), "upload_id");
+    const clickUploadIds     = uniqueStringSet(ofTypeValid("generate_clicked"),  "upload_id");
+    const successUploadIds   = uniqueStringSet(ofTypeValid("generate_success"),  "upload_id");
     const uniqueUploads      = uniqueUploadIds.size;
     const uploadsWithClick   = clickUploadIds.size;
     const uploadsWithSuccess = successUploadIds.size;
 
-    const correctedUploadToGenerateRate = uniqueUploads > 0
-      ? Math.round((uploadsWithClick / uniqueUploads) * 100) : null;
-    const correctedUploadToSuccessRate = uniqueUploads > 0
-      ? Math.round((uploadsWithSuccess / uniqueUploads) * 100) : null;
+    // Debug: visible in Vercel function logs — remove once dataset is fully migrated
+    console.log("[analytics] summary dataset:", {
+      totalEvents: events.length,
+      validEvents: validEvents.length,
+      uniqueUploads,
+    });
 
-    // Avg retries per upload: (avg clicks per uploading upload) - 1
+    // Derived rates — default to 0 (not null) so the UI always renders a number
+    const correctedUploadToGenerateRate = uniqueUploads > 0
+      ? Math.round((uploadsWithClick / uniqueUploads) * 100) : 0;
+    const correctedUploadToSuccessRate = uniqueUploads > 0
+      ? Math.round((uploadsWithSuccess / uniqueUploads) * 100) : 0;
+
+    // Avg retries: (clicks per uploading upload) - 1; 0 when no upload_id clicks yet
     const avgRetriesPerUpload = uploadsWithClick > 0
       ? Math.round(((generateClicks / uploadsWithClick) - 1) * 10) / 10
-      : null;
+      : 0;
 
-    // Failure rate: failed / clicks (clicks = total attempts)
+    // Failure rate over total attempts; 0 when no clicks yet
     const generateFailureRate = generateClicks > 0
-      ? Math.round((generateFailed / generateClicks) * 100) : null;
+      ? Math.round((generateFailed / generateClicks) * 100) : 0;
 
     // Cost from generate_success events (credits only deducted on success)
     const costValues = successEvents
@@ -173,10 +197,10 @@ export async function getAnalyticsSummary(sinceMs?: number): Promise<AnalyticsSu
       .filter((v): v is number => typeof v === "number" && isFinite(v));
     const totalEstimatedCostUsd = costValues.length > 0
       ? Math.round(costValues.reduce((a, b) => a + b, 0) * 100) / 100
-      : null;
-    const avgCostPerSuccess = generateSuccesses > 0 && totalEstimatedCostUsd !== null
+      : 0;
+    const avgCostPerSuccess = generateSuccesses > 0
       ? Math.round((totalEstimatedCostUsd / generateSuccesses) * 1000) / 1000
-      : null;
+      : 0;
 
     return {
       uploads,
