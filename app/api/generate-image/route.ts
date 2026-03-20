@@ -259,6 +259,20 @@ export async function POST(req: Request) {
       });
     }
 
+    // Server-side animal enforcement: image uploads must carry the approval signal
+    // set only after the client-side classifier confirms an animal is present.
+    // Text-only (noImageFlag) requests are exempt — they use a generic animal slot.
+    if (file && !noImageFlag) {
+      const animalApproved = (form.get("animal_approved") as string) === "1";
+      if (!animalApproved) {
+        console.warn("[generate-image] rejected: animal_approved flag missing");
+        return new Response(
+          JSON.stringify({ error: "Image must contain an animal or pet." }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
+
     // if we have a file, guard size
     let inputBuffer: Buffer | null = null;
     let inputB64: string | null = null;

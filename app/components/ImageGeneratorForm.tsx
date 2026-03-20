@@ -391,9 +391,12 @@ export default function ImageGeneratorForm() {
 
     let predictions: { className: string; probability: number }[] = [];
     let detected = false;
+    let classifierFailed = false; // true when classifier errored/timed out (not just non-animal)
 
     if (modelStatus === "error") {
-      detected = true;
+      // Classifier failed to load — fail-closed: block all uploads.
+      classifierFailed = true;
+      detected = false;
       removeToast(uploadToastId);
     } else {
       const tempImg = new Image();
@@ -415,8 +418,10 @@ export default function ImageGeneratorForm() {
         }));
         detected = isAnimalPrediction(predictions);
       } catch (err) {
-        console.error("classifier error (fail open):", err);
-        detected = true;
+        // Fail-closed: classifier timeout or error → block the upload.
+        console.error("[classifier] error (fail-closed):", err);
+        classifierFailed = true;
+        detected = false;
       }
 
       removeToast(uploadToastId);
@@ -426,8 +431,13 @@ export default function ImageGeneratorForm() {
       URL.revokeObjectURL(tempUrl);
       if (inputRef.current) inputRef.current.value = "";
       resizedBlobRef.current = null;
-      addToast("No animal detected. Please upload a photo of a pet or animal.", "error");
-      dispatch(setPredictions(predictions));
+      addToast(
+        classifierFailed
+          ? "Image classifier unavailable — please try again in a moment."
+          : "No animal detected. Please upload a photo of a pet or animal.",
+        "error",
+      );
+      dispatch(setPredictions(predictions.length > 0 ? predictions : null));
       dispatch(setIsAnimal(false));
       processingFileRef.current = false;
       return;
@@ -466,6 +476,11 @@ export default function ImageGeneratorForm() {
     if (submittingRef.current) return;
     if (!preview && !noImage) {
       dispatch(setStatus("Please select an image"));
+      return;
+    }
+    // Hard gate: image must have passed animal classification before we proceed.
+    if (!noImage && isAnimal !== true) {
+      dispatch(setStatus("Please upload an animal or pet photo"));
       return;
     }
     const captionToUse = captionOverride ?? caption;
@@ -520,6 +535,9 @@ export default function ImageGeneratorForm() {
     fd.append("size", size);
     if (topClassifierLabel) fd.append("classifier_label", topClassifierLabel);
     if (noImage) fd.append("no_image", "1");
+    // Server-side enforcement: signal that this image passed animal classification.
+    // Only set for image uploads (not text-only), and only when isAnimal === true.
+    if (!noImage && isAnimal === true) fd.append("animal_approved", "1");
 
     startTimer();
     const uploadStart = Date.now();
@@ -1136,9 +1154,9 @@ export default function ImageGeneratorForm() {
             <button
               type="button"
               onClick={() => submit(false, false)}
-              disabled={loading || !!captionError || !preview || sessionCapReached || credits === 0}
+              disabled={loading || !!captionError || !preview || sessionCapReached || credits === 0 || isAnimal !== true}
               className={`w-full py-4 rounded-2xl text-base font-semibold transition-opacity cursor-pointer disabled:cursor-not-allowed ${
-                loading || captionError || !preview || sessionCapReached || credits === 0
+                loading || captionError || !preview || sessionCapReached || credits === 0 || isAnimal !== true
                   ? "bg-slate-200 text-slate-400"
                   : "bg-emerald-600 text-white hover:opacity-80 active:bg-emerald-700"
               }`}
