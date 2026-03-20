@@ -1,6 +1,7 @@
 // app/layout.tsx
 import "./globals.css";
 import Providers from "./providers";
+import { APP_VERSION } from "./lib/version";
 
 export const metadata = {
   title: "Animal Image Generator",
@@ -29,7 +30,7 @@ export default function RootLayout({
           pointerEvents: "none",
           userSelect: "none",
         }}>
-          v3.0
+          v{APP_VERSION}
         </div>
       </body>
     </html>
