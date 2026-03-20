@@ -23,7 +23,6 @@ import { buildDownloadFilename, resultMimeFromUrl } from "../utils/downloadFilen
 import { trackEvent } from "../utils/trackEvent";
 import { Toaster, type ToastItem, type ToastType } from "./Toaster";
 import PageHeader from "./PageHeader";
-import { APP_VERSION } from "../lib/version";
 
 // Explicit terms to block in the caption field.
 // Intentionally not exhaustive — server-side moderation handles images and catches anything missed here.
@@ -790,10 +789,9 @@ export default function ImageGeneratorForm() {
   const displayUrl = resultUrl && showOriginal ? preview : (resultUrl || preview);
 
   const resultHeadline = THEME_RESULT_HEADLINES[topic] ?? "Your Image is Ready";
-  const creditsLabel = credits !== null ? `${credits} credit${credits === 1 ? "" : "s"} left` : null;
   const resultSubline = elapsedMs
-    ? `Generated in ${(elapsedMs / 1000).toFixed(1)}s${creditsLabel ? ` · ${creditsLabel}` : ""}`
-    : creditsLabel ?? "Download, share, or try another style";
+    ? `Generated in ${(elapsedMs / 1000).toFixed(1)}s`
+    : "Download, share, or try another style";
 
   return (
     <>
@@ -807,6 +805,11 @@ export default function ImageGeneratorForm() {
             <div>
               <h1 className="text-2xl font-bold text-slate-900">{resultHeadline}</h1>
               <p className="text-sm text-slate-500 mt-1">{resultSubline}</p>
+              {credits !== null && (
+                <span className="inline-flex items-center mt-2 bg-white rounded-full px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm whitespace-nowrap">
+                  {credits} credit{credits === 1 ? "" : "s"} left
+                </span>
+              )}
             </div>
           ) : (
             <>
@@ -1205,15 +1208,14 @@ export default function ImageGeneratorForm() {
             </div>
           )}
 
-          {/* Bottom info bar — classifier confidence + version */}
-          <div className="flex items-center justify-center gap-3 text-xs text-slate-400 pb-2">
-            {predictions && predictions.length > 0 && (
-              <span className={isAnimal ? "text-green-600" : "text-red-500"}>
+          {/* Bottom info bar — classifier confidence */}
+          {predictions && predictions.length > 0 && (
+            <div className="flex items-center justify-center pb-2">
+              <span className={`text-xs ${isAnimal ? "text-green-600" : "text-red-500"}`}>
                 {predictions[0].className.split(",")[0]} · {(predictions[0].probability * 100).toFixed(0)}% confidence
               </span>
-            )}
-            <span>v{APP_VERSION}</span>
-          </div>
+            </div>
+          )}
 
         </div>
       </div>
