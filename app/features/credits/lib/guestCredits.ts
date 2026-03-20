@@ -37,6 +37,15 @@ export async function deductGuestCredit(guestId: string): Promise<boolean> {
   return result === 1;
 }
 
+/**
+ * Refunds 1 credit to a guest — the inverse of deductGuestCredit.
+ * Called when a generation times out or fails after the credit was already deducted.
+ * Best-effort: always logs on failure but never throws.
+ */
+export async function refundGuestCredit(guestId: string): Promise<void> {
+  await kv.incrby(guestCreditKey(guestId), 1);
+}
+
 /** Returns true if this Stripe session has already been applied to any guest. */
 export async function isStripeSessionApplied(sessionId: string): Promise<boolean> {
   return (await kv.get(stripeAppliedKey(sessionId))) !== null;

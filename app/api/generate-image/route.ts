@@ -189,6 +189,7 @@ function sanitizeClassifierLabel(raw: string | null): string | null {
 import { checkRateLimit } from "../../lib/rateLimit";
 import { checkGuestRateLimit } from "../../lib/guestRateLimit";
 import { readGuestId } from "../../lib/guestSession";
+import { refundGuestCredit } from "../../features/credits/lib/guestCredits";
 
 function getClientIp(req: Request): string {
   const forwarded = req.headers.get("x-forwarded-for");
@@ -231,6 +232,9 @@ export async function POST(req: Request) {
   // Credit guard — enforces guest session credits (cookie-based, no login required).
   // BYPASS_CREDITS=true in .env.local lets requests through during local dev.
   return requireCredits(req, async () => {
+  const TIMEOUT_MS = 55_000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const form = await req.formData();
     const file = form.get("image") as File | null;
@@ -329,6 +333,7 @@ export async function POST(req: Request) {
           "Content-Type": "application/json",
         },
         body,
+        signal: controller.signal,
       });
       const t1 = Date.now();
       const latencyMs = t1 - t0;
@@ -399,6 +404,7 @@ export async function POST(req: Request) {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: fd as any,
+      signal: controller.signal,
     });
     const t1 = Date.now();
     const latencyMs = t1 - t0;
@@ -476,11 +482,25 @@ export async function POST(req: Request) {
       { status: 502, headers: { "Content-Type": "application/json" } },
     );
   } catch (err: any) {
+    if (err?.name === "AbortError" || controller.signal.aborted) {
+      console.warn("[generate-image] timed out after 55s — refunding credit for guest:", guestId);
+      if (guestId) {
+        await refundGuestCredit(guestId).catch((e) =>
+          console.error("[generate-image] credit refund failed:", e),
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: "Generation timed out. Your credit has been refunded." }),
+        { status: 504, headers: { "Content-Type": "application/json" } },
+      );
+    }
     console.error("Server error in generate-image route:", err);
     return new Response(
       JSON.stringify({ error: "Server error. Please try again." }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
+  } finally {
+    clearTimeout(timeoutId);
   }
   }); // end requireCredits
 }
