@@ -729,6 +729,40 @@ export default function ImageGeneratorForm() {
     }).catch(() => {});
   }
 
+  // Uses the generated image as the new source and opens custom mode.
+  // Carries the user's prior caption. Bypasses classifier (generated image is already approved).
+  async function refineWithGenerated() {
+    if (!resultUrl) return;
+    try {
+      const response = await fetch(resultUrl);
+      const blob = await response.blob();
+      resizedBlobRef.current = blob;
+      resizedMimeRef.current = blob.type || "image/png";
+      uploadIdRef.current = generateId();
+      sessionStartedRef.current = false;
+      dispatch(setIsAnimal(true)); // generated image already passed our pipeline
+      dispatch(setTopic("custom")); // carry into custom mode; caption stays in Redux
+      dispatch(setPreview({ url: resultUrl, name: originalFileNameRef.current }));
+      dispatch(setResult({ url: null, latency: null, cost: null }));
+      clearPersistedResult();
+      setServerModel(null);
+      setServerSizeNote(null);
+      setServerSizeUsed(null);
+      setServerPromptUsed(null);
+      setServerImageDimensions(null);
+      setIdenticalDetected(false);
+      setEmailCtaState("hidden");
+      setEmailInput("");
+      setShowOriginal(false);
+      setShowPrompt(false);
+      setCopied(false);
+      setDownloadCooldown(false);
+    } catch (err) {
+      console.error("[refine] failed to load generated image:", err);
+      addToast("Unable to load the generated image for refinement.", "error");
+    }
+  }
+
   // Keeps current photo and optionally preselects a theme — clears result but preserves upload.
   function exploreStylesKeepImage(themeId?: string) {
     dispatch(setResult({ url: null, latency: null, cost: null }));
@@ -939,29 +973,48 @@ export default function ImageGeneratorForm() {
                 </div>
               )}
 
-              {/* Explore styles with this image */}
+              {/* Card 1: Improve this result */}
               <div className="bg-white rounded-2xl shadow-sm p-4">
-                <p className="text-sm font-semibold text-slate-900 mb-0.5">Explore styles with this image</p>
-                <p className="text-xs text-slate-400 mb-3">Keep your photo, switch the style</p>
-                <div className="grid grid-cols-3 gap-2 mb-3">
-                  {EXPLORE_STYLES.map((style) => (
+                <p className="text-sm font-semibold text-slate-900 mb-3">Improve this result</p>
+                <button
+                  type="button"
+                  onClick={refineWithGenerated}
+                  className="w-full py-4 rounded-2xl bg-emerald-600 text-white text-base font-semibold hover:opacity-80 active:bg-emerald-700 transition-opacity cursor-pointer"
+                >
+                  Refine this image
+                </button>
+                <p className="text-xs text-slate-400 mt-2 text-center">Uses this generated image as the starting point.</p>
+              </div>
+
+              {/* Card 2: Try a different look */}
+              <div className="bg-white rounded-2xl shadow-sm p-4">
+                <p className="text-sm font-semibold text-slate-900 mb-3">Try a different look</p>
+                <div className="flex gap-2 flex-wrap">
+                  {TOPICS.filter((t) => t.id !== topic).map((t) => (
                     <button
-                      key={style.key}
+                      key={t.id}
                       type="button"
-                      onClick={() => exploreStylesKeepImage(style.key === "more" ? undefined : style.key)}
-                      className="py-3 rounded-xl bg-slate-100 text-slate-700 text-sm font-medium hover:bg-slate-200 transition-colors cursor-pointer"
+                      onClick={() => exploreStylesKeepImage(t.id)}
+                      className="px-4 py-2.5 rounded-full text-sm font-medium transition-colors cursor-pointer bg-slate-100 text-slate-700 hover:bg-slate-200"
                     >
-                      {style.label}
+                      {t.label}
                     </button>
                   ))}
                 </div>
+                <p className="text-xs text-slate-400 mt-3">Your original photo is always safe.</p>
+              </div>
+
+              {/* Card 3: Start over */}
+              <div className="bg-white rounded-2xl shadow-sm p-4">
+                <p className="text-sm font-semibold text-slate-900 mb-3">Start over</p>
                 <button
                   type="button"
                   onClick={clearSelection}
-                  className="w-full py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:opacity-80 transition-opacity cursor-pointer"
+                  className="w-full py-4 rounded-2xl bg-emerald-600 text-white text-base font-semibold hover:opacity-80 active:bg-emerald-700 transition-opacity cursor-pointer"
                 >
-                  Upload a new photo
+                  Start with a new image
                 </button>
+                <p className="text-xs text-slate-400 mt-2 text-center">Your original photo is always safe.</p>
               </div>
 
               {/* Share */}
